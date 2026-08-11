@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>แผนวันนี้</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --fg:#16181d; --muted:#666e7a; --line:#e3e6ea;
+    --safe:#1a7f4b; --warn:#a76a00; --crit:#c0392b; --accent:#2c5fd1;
+    --safe-bg:#e8f5ee; --warn-bg:#fdf3e0; --crit-bg:#fbeae8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --card:#1c1f25; --fg:#e8eaee; --muted:#98a1ad; --line:#2a2f38;
+      --safe:#5fd39a; --warn:#e0aa4e; --crit:#f0796b; --accent:#7aa2f7;
+      --safe-bg:#17301f; --warn-bg:#332614; --crit-bg:#3a1e1b;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:16px; background:var(--bg); color:var(--fg);
+    font-family:"Segoe UI",Sarabun,system-ui,-apple-system,sans-serif;
+    line-height:1.6; max-width:760px; margin-inline:auto;
+  }
+  h1{font-size:1.35rem; margin:0 0 4px}
+  .muted{color:var(--muted); font-size:.85rem}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px}
+  button{
+    font:inherit; font-weight:600; padding:12px 18px; border-radius:10px; border:1px solid var(--line);
+    background:var(--card); color:var(--fg); cursor:pointer; min-height:48px;
+  }
+  button.primary{background:var(--accent); color:#fff; border-color:transparent; width:100%; font-size:1.05rem}
+  button:active{transform:translateY(1px)}
+  input{font:inherit; padding:11px; border-radius:9px; border:1px solid var(--line);
+        background:var(--bg); color:var(--fg); width:100%; min-height:46px}
+  label{display:block; margin-bottom:6px; font-weight:600; font-size:.9rem}
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  .cap{display:flex; gap:10px; flex-wrap:wrap; margin-top:8px}
+  .cap div{flex:1 1 90px; background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:8px 10px}
+  .cap b{display:block; font-size:1.25rem}
+  .task{border-left:4px solid var(--line); padding:10px 12px; border-radius:0 9px 9px 0; margin-bottom:8px; background:var(--bg)}
+  .task h3{margin:0 0 3px; font-size:1rem}
+  .safe{border-left-color:var(--safe); background:var(--safe-bg)}
+  .warning{border-left-color:var(--warn); background:var(--warn-bg)}
+  .critical,.overdue,.impossible{border-left-color:var(--crit); background:var(--crit-bg)}
+  .badge{display:inline-block; font-size:.75rem; padding:1px 8px; border-radius:999px;
+         border:1px solid var(--line); margin-right:4px; background:var(--card)}
+  .err{border-color:var(--crit); background:var(--crit-bg)}
+  .stale{border-color:var(--warn); background:var(--warn-bg)}
+  .hidden{display:none}
+  footer{margin-top:18px; font-size:.8rem; color:var(--muted)}
+</style>
+</head>
+<body>
+
+<h1>แผนวันนี้</h1>
+<p class="muted" id="sub">ยังไม่ได้เชื่อมต่อ</p>
+
+<!-- ตั้งค่า token — ไม่มี token ฝังในหน้านี้ ผู้ใช้กรอกเองเสมอ (INVARIANTS §5.2) -->
+<section class="card" id="setup">
+  <label for="pat">GitHub token (fine-grained · สิทธิ์ Contents: read ของ repo life)</label>
+  <input id="pat" type="password" autocomplete="off" placeholder="github_pat_...">
+  <div class="row" style="margin:10px 0">
+    <label style="font-weight:400; margin:0">
+      <input type="checkbox" id="remember" style="width:auto; min-height:0; margin-right:6px">
+      จำไว้ในเครื่องนี้
+    </label>
+    <span class="muted">อย่าติ๊กบนคอมที่ทำงาน — ไม่ติ๊กแล้วโทเคนจะหายเมื่อปิดแท็บ</span>
+  </div>
+  <button class="primary" id="connect">เชื่อมต่อ</button>
+</section>
+
+<section id="status"></section>
+
+<section class="card hidden" id="plan">
+  <div class="row" style="justify-content:space-between">
+    <strong id="dayLabel"></strong>
+    <span class="muted" id="genAt"></span>
+  </div>
+  <div class="cap" id="cap"></div>
+  <button class="primary" id="speak" style="margin-top:12px">🔊 อ่านให้ฟัง</button>
+  <p class="muted" style="margin:8px 0 0">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
+</section>
+
+<section id="tasks"></section>
+
+<footer>
+  <div class="row">
+    <button id="refresh">รีเฟรช</button>
+    <button id="forget">ล้างโทเคนในเครื่องนี้</button>
+  </div>
+  <p>ข้อมูลมาจาก repo ส่วนตัว · หน้านี้ไม่เก็บอะไรไว้บนเซิร์ฟเวอร์</p>
+</footer>
+
+<script>
+const REPO = 'TP-operation/life';
+const PATH = 'state/today.json';
+const KEY  = 'life_pat';
+
+const $ = (id) => document.getElementById(id);
+const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);
+const getToken = () => localStorage.getItem(KEY) || sessionStorage.getItem(KEY) || '';
+
+function note(msg, cls = '') {
+  $('status').innerHTML = `<div class="card ${cls}">${msg}</div>`;
+}
+
+// INVARIANTS §6.4 — โหลดไม่ได้ต้องบอกตรง ๆ ห้ามปล่อยของเก่าค้างจนเข้าใจผิดว่าไม่มีอะไรเกิดขึ้น
+function fail(msg, detail) {
+  $('plan').classList.add('hidden');
+  $('tasks').innerHTML = '';
+  note(`<strong>โหลดข้อมูลไม่ได้</strong><br>${msg}${detail ? `<br><span class="muted">${detail}</span>` : ''}`, 'err');
+}
+
+async function load() {
+  const token = getToken();
+  if (!token) { $('setup').classList.remove('hidden'); note('ใส่โทเคนเพื่อเริ่ม'); return; }
+  $('setup').classList.add('hidden');
+  note('กำลังโหลด…');
+
+  let res;
+  try {
+    res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PATH}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+  } catch (e) {
+    return fail('ต่อเน็ตไม่ได้ หรือเครือข่ายบล็อก api.github.com', e.message);
+  }
+
+  if (res.status === 401) return fail('โทเคนไม่ถูกต้องหรือหมดอายุแล้ว', 'ออกใบใหม่แล้วกด "ล้างโทเคน" เพื่อใส่ใหม่');
+  if (res.status === 404) return fail('ไม่พบไฟล์แผนวันนี้', 'อาจยังไม่เคยรัน daily-plan หรือโทเคนไม่มีสิทธิ์ repo นี้');
+  if (res.status === 403) return fail('ถูกปฏิเสธ', 'โทเคนอาจไม่มีสิทธิ์ Contents: read หรือโดนจำกัดจำนวนครั้ง');
+  if (!res.ok) return fail(`GitHub ตอบกลับ ${res.status}`, await res.text().catch(() => ''));
+
+  let data;
+  try { data = JSON.parse(await res.text()); }
+  catch (e) { return fail('ไฟล์แผนวันนี้อ่านไม่ออก', e.message); }
+
+  render(data);
+}
+
+function render(d) {
+  const gen = new Date(d.generatedAt);
+  const ageH = (Date.now() - gen.getTime()) / 3_600_000;
+  const stamp = gen.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' });
+
+  // ข้อมูลเก่ากว่า 18 ชม. แปลว่า daily-plan ไม่ได้รัน — ต้องเห็นชัด ไม่ใช่เดาเอง
+  if (ageH > 18) {
+    note(`<strong>ข้อมูลนี้เก่า ${Math.round(ageH)} ชั่วโมงแล้ว</strong><br>
+          <span class="muted">workflow daily-plan อาจไม่ได้รัน — GitHub ปิด cron อัตโนมัติเมื่อ repo เงียบเกิน 60 วัน</span>`, 'stale');
+  } else {
+    note(`อัปเดตล่าสุด ${stamp}`);
+  }
+
+  $('sub').textContent = `${d.tasks.length} งานค้าง`;
+  $('dayLabel').textContent = d.dayLabel;
+  $('genAt').textContent = stamp;
+
+  const c = d.capacityToday;
+  $('cap').innerHTML = [
+    ['งานโรงงาน', c.work], ['โปรเจค', c.project], ['ชีวิต', c.life],
+  ].map(([k, v]) => `<div><span class="muted">${k}</span><b>${v} ชม.</b></div>`).join('');
+
+  const TH = { work: 'งานโรงงาน', project: 'โปรเจค', life: 'ชีวิต' };
+  const ST = { safe: 'พอไหว', warning: 'เริ่มตึง', critical: 'ต้องลงมือแล้ว', overdue: 'เลยกำหนด', impossible: 'ไม่มีเวลาเหลือ' };
+
+  $('tasks').innerHTML = d.tasks.length === 0
+    ? '<div class="card">ไม่มีงานค้าง</div>'
+    : d.tasks.map((t) => `
+      <div class="task ${t.status}">
+        <h3>${t.title}</h3>
+        <div>
+          <span class="badge">${TH[t.context] ?? t.context}</span>
+          <span class="badge">${ST[t.status] ?? t.status}</span>
+          <span class="badge">เหลือเวลา ${t.availableHours} ชม. · ต้องใช้ ${t.effectiveEst} ชม.</span>
+          ${t.rolled >= 3 ? '<span class="badge">เลื่อนมา ' + t.rolled + ' ครั้ง — ตัดทิ้งดีไหม</span>' : ''}
+        </div>
+        <div class="muted">กำหนดส่ง ${t.deadline}</div>
+      </div>`).join('');
+
+  $('plan').classList.remove('hidden');
+  $('plan').dataset.speech = d.speech || '';
+}
+
+$('connect').onclick = () => {
+  const v = $('pat').value.trim();
+  if (!v) return;
+  ($('remember').checked ? localStorage : sessionStorage).setItem(KEY, v);
+  $('pat').value = '';
+  load();
+};
+
+$('forget').onclick = () => {
+  localStorage.removeItem(KEY); sessionStorage.removeItem(KEY);
+  $('plan').classList.add('hidden'); $('tasks').innerHTML = '';
+  $('setup').classList.remove('hidden');
+  note('ล้างโทเคนในเครื่องนี้แล้ว');
+};
+
+$('refresh').onclick = load;
+
+$('speak').onclick = () => {
+  const text = $('plan').dataset.speech;
+  if (!text) return;
+  if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'th-TH';
+  u.rate = 0.95;
+  speechSynthesis.speak(u);
+};
+
+load();
+</script>
+</body>
+</html>
