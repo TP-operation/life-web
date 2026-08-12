@@ -108,6 +108,17 @@
   </div>
 </section>
 
+<!-- ถามความรู้ — ทางเดียวที่ถาม AI ได้จากคอมที่ทำงาน -->
+<section class="card hidden" id="askBox">
+  <label for="askInput">ถามเรื่องหลักการ</label>
+  <textarea id="askInput" rows="3" placeholder="เช่น content uniformity กับ blend uniformity ต่างกันยังไง"></textarea>
+  <button class="primary" id="askSend" style="margin-top:8px">ถาม</button>
+  <p class="muted" id="askNote" style="margin:8px 0 0">
+    ใช้เวลาราว 1 นาที · คำตอบจะถูกเก็บเป็นโน้ตใน <code>30-knowledge/</code> พร้อมลิงก์ไปเรื่องที่เคยถาม
+  </p>
+  <div id="askAnswer"></div>
+</section>
+
 <!-- เพิ่มงาน — สำหรับของที่รู้ชัดแล้วว่าเป็นงาน ใช้เวลาเท่าไร ส่งเมื่อไหร่
      พับไว้เพราะใช้น้อยกว่ากล่อง inbox และไม่ควรมาบังของที่ใช้บ่อยกว่า -->
 <section class="card hidden" id="newTaskBox">
@@ -377,6 +388,7 @@ function render(d) {
 
   $('plan').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
+  $('askBox').classList.remove('hidden');
   $('newTaskBox').classList.remove('hidden');
   $('inboxBox').classList.remove('hidden');
   if (!$('ntDeadline').value) {
@@ -385,6 +397,79 @@ function render(d) {
   }
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
+
+// ── ถามความรู้ ─────────────────────────────────────────────
+// เปิด issue แล้วรอ agent ตอบเป็นคอมเมนต์ · ไม่มีเซิร์ฟเวอร์จึงต้อง poll เอา
+// ~1 นาทีเพราะ Actions ต้องบูตเครื่องและติดตั้ง Claude Code ก่อนถึงจะเริ่มคิด
+const ASK_POLL_MS = 10000;
+const ASK_TIMEOUT_MS = 240000;
+
+async function pollAnswer(issueNumber, token, startedAt = Date.now()) {
+  if (Date.now() - startedAt > ASK_TIMEOUT_MS) {
+    $('askNote').innerHTML = `ยังไม่ได้คำตอบใน 4 นาที — ดูที่ <a href="https://github.com/${REPO}/issues/${issueNumber}" target="_blank" rel="noopener">issue #${issueNumber}</a> โดยตรง`;
+    return;
+  }
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const comments = await res.json();
+      if (comments.length) {
+        $('askNote').textContent = `ตอบแล้ว · เก็บเป็นโน้ตใน 30-knowledge/ เรียบร้อย`;
+        $('askAnswer').innerHTML = `<div class="task" style="margin-top:10px; white-space:pre-wrap">${
+          comments.map((c) => c.body).join('\n\n---\n\n').replace(/[<>]/g, (m) => ({ '<': '&lt;', '>': '&gt;' }[m]))
+        }</div>`;
+        return;
+      }
+    }
+  } catch { /* เน็ตสะดุดระหว่าง poll — ลองใหม่รอบหน้า */ }
+  setTimeout(() => pollAnswer(issueNumber, token, startedAt), ASK_POLL_MS);
+}
+
+$('askSend').onclick = async () => {
+  const q = $('askInput').value.trim();
+  if (!q) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('askSend');
+  btn.disabled = true;
+  btn.textContent = 'กำลังส่ง…';
+  $('askAnswer').innerHTML = '';
+
+  const lines = q.split('\n');
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: `ถาม ${lines[0].slice(0, 80)}`,
+        body: lines.slice(1).join('\n').trim(),
+      }),
+    });
+    if (!res.ok) {
+      $('askNote').textContent = res.status === 403 || res.status === 404
+        ? 'โทเคนนี้เปิด issue ไม่ได้ — ต้องมีสิทธิ์ Issues: Read and write'
+        : `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+    const issue = await res.json();
+    $('askInput').value = '';
+    $('askNote').textContent = `กำลังคิด… (issue #${issue.number}) ปกติใช้เวลาราว 1 นาที`;
+    pollAnswer(issue.number, token);
+  } catch (e) {
+    $('askNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ถาม';
+  }
+};
 
 // ── เพิ่มงานใหม่ ───────────────────────────────────────────
 // ค่า est มาจากเจ้าของโดยตรง ไม่ใช่การเดา — urgency ทั้งระบบยืนอยู่บนตัวนี้
