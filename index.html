@@ -237,6 +237,7 @@ async function load() {
 
   render(data);
   loadWeek(token);
+  resumeAsk(token);
 }
 
 // สรุปสัปดาห์เป็นของเสริม — ถ้ายังไม่มีไฟล์ก็ไม่ต้องรบกวนหน้าจอ
@@ -403,9 +404,23 @@ function render(d) {
 // ~1 นาทีเพราะ Actions ต้องบูตเครื่องและติดตั้ง Claude Code ก่อนถึงจะเริ่มคิด
 const ASK_POLL_MS = 10000;
 const ASK_TIMEOUT_MS = 240000;
+// คำถามที่ยังรอคำตอบอยู่ใน localStorage ไม่ใช่ในตัวแปร
+// หนึ่งนาทีนานพอที่จะสลับไปทำอย่างอื่นหรือปิดแท็บ — พอกลับมาต้องได้คำตอบเหมือนเดิม
+const ASK_KEY = 'life_pending_ask';
+
+const esc = (s) => s.replace(/[<>&]/g, (m) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[m]));
+
+function showAnswer(comments, issueNumber) {
+  $('askNote').innerHTML = `ตอบเมื่อสักครู่ · เก็บเป็นโน้ตใน <code>30-knowledge/</code> แล้ว ·
+    <a href="https://github.com/${REPO}/issues/${issueNumber}" target="_blank" rel="noopener">ดูใน issue</a>`;
+  $('askAnswer').innerHTML = `<div class="task" style="margin-top:10px; white-space:pre-wrap">${
+    esc(comments.map((c) => c.body).join('\n\n———\n\n'))
+  }</div>`;
+}
 
 async function pollAnswer(issueNumber, token, startedAt = Date.now()) {
   if (Date.now() - startedAt > ASK_TIMEOUT_MS) {
+    localStorage.removeItem(ASK_KEY);
     $('askNote').innerHTML = `ยังไม่ได้คำตอบใน 4 นาที — ดูที่ <a href="https://github.com/${REPO}/issues/${issueNumber}" target="_blank" rel="noopener">issue #${issueNumber}</a> โดยตรง`;
     return;
   }
@@ -417,15 +432,26 @@ async function pollAnswer(issueNumber, token, startedAt = Date.now()) {
     if (res.ok) {
       const comments = await res.json();
       if (comments.length) {
-        $('askNote').textContent = `ตอบแล้ว · เก็บเป็นโน้ตใน 30-knowledge/ เรียบร้อย`;
-        $('askAnswer').innerHTML = `<div class="task" style="margin-top:10px; white-space:pre-wrap">${
-          comments.map((c) => c.body).join('\n\n---\n\n').replace(/[<>]/g, (m) => ({ '<': '&lt;', '>': '&gt;' }[m]))
-        }</div>`;
+        localStorage.removeItem(ASK_KEY);
+        showAnswer(comments, issueNumber);
         return;
       }
     }
   } catch { /* เน็ตสะดุดระหว่าง poll — ลองใหม่รอบหน้า */ }
   setTimeout(() => pollAnswer(issueNumber, token, startedAt), ASK_POLL_MS);
+}
+
+/** เปิดหน้ามาแล้วมีคำถามค้างอยู่ — ตามต่อให้เลย */
+function resumeAsk(token) {
+  const raw = localStorage.getItem(ASK_KEY);
+  if (!raw) return;
+  let pending;
+  try { pending = JSON.parse(raw); } catch { localStorage.removeItem(ASK_KEY); return; }
+  if (!pending?.issue) { localStorage.removeItem(ASK_KEY); return; }
+
+  $('askNote').textContent = `กำลังตามคำตอบของคำถามที่ถามค้างไว้ (issue #${pending.issue})…`;
+  // startedAt เดิม เพื่อให้หมดเวลาเมื่อครบ 4 นาทีนับจากตอนถามจริง ไม่ใช่ตอนเปิดหน้า
+  pollAnswer(pending.issue, token, pending.at ?? Date.now());
 }
 
 $('askSend').onclick = async () => {
@@ -461,7 +487,8 @@ $('askSend').onclick = async () => {
     }
     const issue = await res.json();
     $('askInput').value = '';
-    $('askNote').textContent = `กำลังคิด… (issue #${issue.number}) ปกติใช้เวลาราว 1 นาที`;
+    localStorage.setItem(ASK_KEY, JSON.stringify({ issue: issue.number, at: Date.now() }));
+    $('askNote').textContent = `กำลังคิด… (issue #${issue.number}) ปกติราว 1 นาที · ปิดแท็บได้ กลับมาแล้วคำตอบยังอยู่`;
     pollAnswer(issue.number, token);
   } catch (e) {
     $('askNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
