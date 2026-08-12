@@ -156,8 +156,17 @@ function render(d) {
   }
 
   $('sub').textContent = `${d.tasks.length} งานค้าง`;
-  $('dayLabel').textContent = d.dayLabel;
+  $('dayLabel').innerHTML = d.specialDay
+    ? `${d.dayLabel} <span class="badge">${d.specialDay.kindWord}${d.specialDay.note ? ' · ' + d.specialDay.note : ''}</span>`
+    : d.dayLabel;
   $('genAt').textContent = stamp;
+
+  // บรรทัดในปฏิทินพิเศษที่อ่านไม่ออกต้องเห็นชัด ไม่งั้นวันลาที่พิมพ์ผิดจะเงียบหายไป
+  if (d.calendarWarnings?.length) {
+    $('status').insertAdjacentHTML('beforeend',
+      `<div class="card stale"><strong>ปฏิทินพิเศษมีบรรทัดที่อ่านไม่ออก ${d.calendarWarnings.length} บรรทัด</strong>
+       <ul style="margin:6px 0 0 18px; padding:0">${d.calendarWarnings.map((w) => `<li>${w}</li>`).join('')}</ul></div>`);
+  }
 
   const c = d.capacityToday;
   $('cap').innerHTML = [
