@@ -81,7 +81,7 @@
   </div>
   <div class="cap" id="cap"></div>
   <button class="primary" id="speak" style="margin-top:12px">🔊 อ่านให้ฟัง</button>
-  <p class="muted" style="margin:8px 0 0">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
+  <p class="muted" style="margin:8px 0 0" id="voiceInfo">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
 </section>
 
 <section id="tasks"></section>
@@ -182,7 +182,7 @@ function render(d) {
       </div>`).join('');
 
   $('plan').classList.remove('hidden');
-  $('plan').dataset.speech = d.speech || '';
+  speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
 
 $('connect').onclick = () => {
@@ -202,14 +202,33 @@ $('forget').onclick = () => {
 
 $('refresh').onclick = load;
 
+// ── เสียงอ่าน ──────────────────────────────────────────────
+// อ่านทีละประโยคแทนการส่งก้อนเดียว เสียงไทยที่ติดมากับเครื่องอ่านประโยคยาวรวดเดียว
+// แล้วจังหวะเพี้ยน การแยก utterance ทำให้ได้ช่วงหยุดหายใจระหว่างประโยคเอง
+let speechLines = [];
+let thaiVoice = null;
+
+function pickVoice() {
+  const th = speechSynthesis.getVoices().filter((v) => /^th/i.test(v.lang));
+  // เสียงของ Google มักลื่นกว่าเสียงที่ติดมากับระบบ
+  thaiVoice = th.find((v) => /google/i.test(v.name)) || th[0] || null;
+  $('voiceInfo').textContent = thaiVoice
+    ? `กดก่อนออกรถ แล้ววางมือถือลงได้เลย · เสียง: ${thaiVoice.name}`
+    : 'เครื่องนี้ไม่มีเสียงภาษาไทย — ลงเสียงไทยเพิ่มในตั้งค่าระบบก่อน ไม่งั้นจะอ่านเพี้ยน';
+}
+pickVoice();
+speechSynthesis.addEventListener('voiceschanged', pickVoice);
+
 $('speak').onclick = () => {
-  const text = $('plan').dataset.speech;
-  if (!text) return;
-  if (speechSynthesis.speaking) { speechSynthesis.cancel(); return; }
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'th-TH';
-  u.rate = 0.95;
-  speechSynthesis.speak(u);
+  if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); return; }
+  if (!speechLines.length) return;
+  for (const line of speechLines) {
+    const u = new SpeechSynthesisUtterance(line);
+    u.lang = 'th-TH';
+    u.rate = 0.9;
+    if (thaiVoice) u.voice = thaiVoice;
+    speechSynthesis.speak(u);
+  }
 };
 
 load();
