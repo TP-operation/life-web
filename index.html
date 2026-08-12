@@ -97,6 +97,7 @@
 </section>
 
 <section id="tasks"></section>
+<section id="week"></section>
 
 <footer>
   <div class="row">
@@ -109,6 +110,7 @@
 <script>
 const REPO = 'TP-operation/life';
 const PATH = 'state/today.json';
+const WEEK_PATH = 'state/week.json';
 const KEY  = 'life_pat';
 
 const $ = (id) => document.getElementById(id);
@@ -152,6 +154,53 @@ async function load() {
   catch (e) { return fail('ไฟล์แผนวันนี้อ่านไม่ออก', e.message); }
 
   render(data);
+  loadWeek(token);
+}
+
+// สรุปสัปดาห์เป็นของเสริม — ถ้ายังไม่มีไฟล์ก็ไม่ต้องรบกวนหน้าจอ
+async function loadWeek(token) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${WEEK_PATH}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    renderWeek(JSON.parse(await res.text()));
+  } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+function renderWeek(w) {
+  const bar = (label, value, target) =>
+    `<div><span class="muted">${label}</span><b>${value} ชม.</b>${target ? `<span class="muted"> / เป้า ${target}</span>` : ''}</div>`;
+
+  const gaps = w.gaps?.length
+    ? `<div class="task warning" style="margin-top:10px">${w.gaps.map((g) => `<div>${g}</div>`).join('')}</div>`
+    : '';
+
+  // INVARIANTS §6.2 — งานที่เลื่อนบ่อยไม่ใช่เรื่องต้องทวง แต่เป็นสัญญาณว่ามันใหญ่เกินช่องเวลา
+  const stuck = w.stuck?.length
+    ? `<div style="margin-top:10px">
+         <strong>ถูกเลื่อนหลายรอบแล้ว</strong>
+         <p class="muted" style="margin:2px 0 6px">น่าจะใหญ่เกินช่องเวลาที่ให้ไว้ — ตัดทิ้ง แตกย่อย หรือขยายเวลาที่ประเมิน?</p>
+         ${w.stuck.map((t) => `<div class="task">${t.title} <span class="badge">เลื่อนมา ${t.rolled} ครั้ง</span></div>`).join('')}
+       </div>`
+    : '';
+
+  const closed = w.closed?.length
+    ? `<div class="muted" style="margin-top:8px">ปิดไปแล้วสัปดาห์นี้ ${w.closed.length} งาน</div>`
+    : '';
+
+  $('week').innerHTML = `
+    <div class="card">
+      <strong>สัปดาห์นี้</strong> <span class="muted">${w.weekStart} ถึง ${w.weekEnd}</span>
+      <div class="cap">
+        ${bar('ออกกำลังกาย', w.capacity.exercise, w.targets?.exercise?.min)}
+        ${bar('โปรเจค', w.capacity.project, w.targets?.project?.max)}
+        ${bar('งานโรงงาน', w.capacity.work)}
+      </div>
+      <p class="muted" style="margin:8px 0 0">ตัวเลขนี้คือเวลาที่ <em>ตารางให้</em> ไม่ใช่เวลาที่ใช้จริง — ระบบไม่จับเวลาคุณ</p>
+      ${gaps}${stuck}${closed}
+    </div>`;
 }
 
 function render(d) {
