@@ -49,6 +49,8 @@
   .critical,.overdue,.impossible{border-left-color:var(--crit); background:var(--crit-bg)}
   .badge{display:inline-block; font-size:.75rem; padding:1px 8px; border-radius:999px;
          border:1px solid var(--line); margin-right:4px; background:var(--card)}
+  .spark{display:flex; gap:4px; align-items:flex-end; height:64px; margin:6px 0 2px}
+  .spark div{flex:1; background:var(--accent); border-radius:3px 3px 0 0; min-height:2px}
   .err{border-color:var(--crit); background:var(--crit-bg)}
   .stale{border-color:var(--warn); background:var(--warn-bg)}
   .hidden{display:none}
@@ -86,6 +88,26 @@
   <p class="muted" style="margin:8px 0 0" id="voiceInfo">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
 </section>
 
+<!-- จับเวลาออกกำลังกาย — กิจกรรมเดียวที่ระบบจับเวลา -->
+<section class="card hidden" id="timerBox">
+  <div class="row" style="justify-content:space-between; align-items:baseline">
+    <strong>ออกกำลังกาย</strong>
+    <span class="muted" id="timerHint">กดเริ่มตอนลงมือ</span>
+  </div>
+  <div id="timerDisplay" style="font-size:2.4rem; font-weight:700; letter-spacing:1px; margin:6px 0">00:00</div>
+  <button class="primary" id="timerBtn">เริ่มจับเวลา</button>
+
+  <div id="timerConfirm" class="hidden" style="margin-top:10px">
+    <label for="timerMinutes">บันทึกกี่นาที</label>
+    <input id="timerMinutes" type="number" min="1" max="600" inputmode="numeric">
+    <p class="muted" style="margin:6px 0" id="timerWarn"></p>
+    <div class="row" style="margin-top:6px">
+      <button class="primary" id="timerSave" style="flex:1">บันทึก</button>
+      <button id="timerDrop">ทิ้ง</button>
+    </div>
+  </div>
+</section>
+
 <!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
 <section class="card hidden" id="inboxBox">
   <label for="inbox">โยนเข้ากล่อง</label>
@@ -112,6 +134,7 @@ const REPO = 'TP-operation/life';
 const PATH = 'state/today.json';
 const WEEK_PATH = 'state/week.json';
 const KEY  = 'life_pat';
+const TREND_LABEL = '8 สัปดาห์ล่าสุด';
 
 const $ = (id) => document.getElementById(id);
 const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);
@@ -173,6 +196,37 @@ function renderWeek(w) {
   const bar = (label, value, target) =>
     `<div><span class="muted">${label}</span><b>${value} ชม.</b>${target ? `<span class="muted"> / เป้า ${target}</span>` : ''}</div>`;
 
+  // แนวโน้มเทียบกับตัวเองเมื่อก่อน ไม่ใช่เทียบกับเป้า — ไว้ติดตามพัฒนาการ ไม่ใช่ตัดสิน
+  const t = w.trend;
+  let trendBlock = '';
+  if (t?.weeks?.length) {
+    const max = Math.max(...t.weeks.map((x) => x.hours), 1);
+    const bars = t.weeks.map((x) => {
+      const pct = Math.round((x.hours / max) * 100);
+      const isNow = x.weekStart === w.weekStart;
+      return `<div title="สัปดาห์ ${x.weekStart} · ${x.hours} ชม. · ${x.sessions} ครั้ง"
+                   style="height:${Math.max(pct, 2)}%; opacity:${isNow ? 1 : 0.55}"></div>`;
+    }).join('');
+    trendBlock = `
+      <div style="margin-top:12px">
+        <div class="row" style="justify-content:space-between">
+          <strong>ออกกำลังกาย ${TREND_LABEL}</strong>
+          <span class="badge">${t.direction}</span>
+        </div>
+        <div class="spark">${bars}</div>
+        <div class="row muted" style="justify-content:space-between; font-size:.75rem">
+          <span>${t.weeks[0].weekStart}</span><span>สัปดาห์นี้</span>
+        </div>
+        ${t.recentAvg || t.olderAvg
+          ? `<div class="muted" style="margin-top:4px">เฉลี่ย 4 สัปดาห์ล่าสุด ${t.recentAvg} ชม. · 4 สัปดาห์ก่อนหน้า ${t.olderAvg} ชม.</div>`
+          : '<div class="muted" style="margin-top:4px">กดเริ่ม/หยุดจับเวลาไปสักพัก แล้วกราฟนี้จะเริ่มมีความหมาย</div>'}
+      </div>`;
+  }
+
+  const warn = w.exerciseWarnings?.length
+    ? `<div class="task warning" style="margin-top:10px">${w.exerciseWarnings.map((x) => `<div>${x}</div>`).join('')}</div>`
+    : '';
+
   const gaps = w.gaps?.length
     ? `<div class="task warning" style="margin-top:10px">${w.gaps.map((g) => `<div>${g}</div>`).join('')}</div>`
     : '';
@@ -193,13 +247,27 @@ function renderWeek(w) {
   $('week').innerHTML = `
     <div class="card">
       <strong>สัปดาห์นี้</strong> <span class="muted">${w.weekStart} ถึง ${w.weekEnd}</span>
-      <div class="cap">
-        ${bar('ออกกำลังกาย', w.capacity.exercise, w.targets?.exercise?.min)}
-        ${bar('โปรเจค', w.capacity.project, w.targets?.project?.max)}
-        ${bar('งานโรงงาน', w.capacity.work)}
+
+      <div class="cap" style="margin-top:8px">
+        <div style="border-color:var(--accent)">
+          <span class="muted">ออกกำลังกายจริง</span>
+          <b>${w.actual?.exercise ?? 0} ชม.</b>
+          <span class="muted">${w.actual?.sessions ?? 0} ครั้ง · เป้า ${w.targets?.exercise?.min}</span>
+        </div>
       </div>
-      <p class="muted" style="margin:8px 0 0">ตัวเลขนี้คือเวลาที่ <em>ตารางให้</em> ไม่ใช่เวลาที่ใช้จริง — ระบบไม่จับเวลาคุณ</p>
-      ${gaps}${stuck}${closed}
+
+      ${trendBlock}
+
+      <div style="margin-top:14px">
+        <div class="muted" style="font-size:.85rem">เวลาที่ตารางให้สัปดาห์นี้</div>
+        <div class="cap">
+          ${bar('ออกกำลังกาย', w.capacity.exercise, w.targets?.exercise?.min)}
+          ${bar('โปรเจค', w.capacity.project, w.targets?.project?.max)}
+          ${bar('งานโรงงาน', w.capacity.work)}
+        </div>
+        <p class="muted" style="margin:6px 0 0">ตัวเลขชุดนี้คือเวลาที่ <em>ตารางเปิดช่องไว้ให้</em> — มีแค่ออกกำลังกายเท่านั้นที่ระบบรู้ว่าทำจริงเท่าไร</p>
+      </div>
+      ${warn}${gaps}${stuck}${closed}
     </div>`;
 }
 
@@ -252,9 +320,103 @@ function render(d) {
       </div>`).join('');
 
   $('plan').classList.remove('hidden');
+  $('timerBox').classList.remove('hidden');
   $('inboxBox').classList.remove('hidden');
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
+
+// ── จับเวลาออกกำลังกาย ─────────────────────────────────────
+// เวลาที่เริ่มอยู่ใน localStorage ไม่ใช่ในตัวแปร — ปิดแท็บหรือล็อกจอแล้วยังนับต่อ
+// ซึ่งจำเป็น เพราะไม่มีใครถือมือถือดูหน้าจอตลอดชั่วโมงที่ออกกำลังกาย
+const T_KEY = 'life_exercise_start';
+let timerTick = null;
+
+const fmt = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0
+    ? `${h}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
+    : `${pad(Math.floor(s / 60))}:${pad(s % 60)}`;
+};
+
+function paintTimer() {
+  const start = Number(localStorage.getItem(T_KEY) || 0);
+  if (!start) {
+    $('timerDisplay').textContent = '00:00';
+    $('timerBtn').textContent = 'เริ่มจับเวลา';
+    $('timerHint').textContent = 'กดเริ่มตอนลงมือ';
+    if (timerTick) { clearInterval(timerTick); timerTick = null; }
+    return;
+  }
+  $('timerDisplay').textContent = fmt(Date.now() - start);
+  $('timerBtn').textContent = 'หยุดและบันทึก';
+  $('timerHint').textContent = 'กำลังนับ — ปิดแท็บได้ ไม่หาย';
+  if (!timerTick) timerTick = setInterval(paintTimer, 1000);
+}
+
+$('timerBtn').onclick = () => {
+  const start = Number(localStorage.getItem(T_KEY) || 0);
+  if (!start) {
+    localStorage.setItem(T_KEY, String(Date.now()));
+    $('timerConfirm').classList.add('hidden');
+    paintTimer();
+    return;
+  }
+  // ยืนยันจำนวนนาทีก่อนบันทึกเสมอ — ลืมกดหยุดเป็นเรื่องปกติ
+  // และตัวเลขที่ผิดจะไปโผล่ในรายงานพัฒนาการซึ่งแก้ยากกว่าตรงนี้
+  const mins = Math.max(1, Math.round((Date.now() - start) / 60000));
+  $('timerMinutes').value = mins;
+  $('timerWarn').textContent = mins > 180
+    ? `${mins} นาทีนานผิดปกติ — ถ้าลืมกดหยุด แก้ตัวเลขก่อนบันทึกได้`
+    : '';
+  $('timerConfirm').classList.remove('hidden');
+};
+
+$('timerDrop').onclick = () => {
+  localStorage.removeItem(T_KEY);
+  $('timerConfirm').classList.add('hidden');
+  paintTimer();
+};
+
+$('timerSave').onclick = async () => {
+  const mins = Number($('timerMinutes').value);
+  if (!Number.isFinite(mins) || mins <= 0) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('timerSave');
+  btn.disabled = true;
+  btn.textContent = 'กำลังบันทึก…';
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `ออกกำลังกาย ${Math.round(mins)} นาที` }),
+    });
+    if (!res.ok) {
+      $('timerWarn').textContent = res.status === 403 || res.status === 404
+        ? 'โทเคนนี้เปิด issue ไม่ได้ — ต้องมีสิทธิ์ Issues: Read and write'
+        : `บันทึกไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;   // ไม่ล้างเวลาที่จับไว้ จะได้กดใหม่ได้โดยไม่เสียข้อมูล
+    }
+    localStorage.removeItem(T_KEY);
+    $('timerConfirm').classList.add('hidden');
+    $('timerHint').textContent = `บันทึกแล้ว ${Math.round(mins)} นาที`;
+    paintTimer();
+  } catch (e) {
+    $('timerWarn').textContent = `บันทึกไม่สำเร็จ — ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'บันทึก';
+  }
+};
+
+paintTimer();
 
 // ── โยนเข้ากล่อง ───────────────────────────────────────────
 // เปิด issue แทนการเขียนไฟล์ตรง ๆ — โทเคนบนเครื่องที่ทำงานจึงแตะเนื้อ repo ไม่ได้เลย
