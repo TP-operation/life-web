@@ -316,13 +316,64 @@ function render(d) {
           <span class="badge">เหลือเวลา ${t.availableHours} ชม. · ต้องใช้ ${t.effectiveEst} ชม.</span>
           ${t.rolled >= 3 ? '<span class="badge">เลื่อนมา ' + t.rolled + ' ครั้ง — ตัดทิ้งดีไหม</span>' : ''}
         </div>
-        <div class="muted">กำหนดส่ง ${t.deadline}</div>
+        <div class="row" style="justify-content:space-between; align-items:center">
+        <span class="muted">กำหนดส่ง ${t.deadline}</span>
+        <button class="done-btn" data-task="${t.title}" style="min-height:38px; padding:6px 14px; font-size:.85rem">เสร็จ</button>
+      </div>
       </div>`).join('');
+
+  // กดสองครั้งแทน dialog ยืนยัน — กันกดพลาดบนมือถือโดยไม่ขวางทางตอนตั้งใจกด
+  for (const btn of document.querySelectorAll('.done-btn')) {
+    btn.onclick = () => closeTask(btn);
+  }
 
   $('plan').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
   $('inboxBox').classList.remove('hidden');
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
+}
+
+// ── ปิดงาน ─────────────────────────────────────────────────
+// เปิด issue "ปิดงาน <ชื่อ>" แทนการแก้ไฟล์ตรง ๆ ด้วยเหตุผลเดียวกับกล่อง inbox:
+// โทเคนบนเครื่องที่ทำงานต้องแตะเนื้อ repo ไม่ได้เลย (INVARIANTS §5.1)
+async function closeTask(btn) {
+  const title = btn.dataset.task;
+
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'กดอีกครั้ง';
+    setTimeout(() => {
+      if (btn.dataset.armed === '1') { btn.dataset.armed = '0'; btn.textContent = 'เสร็จ'; }
+    }, 4000);
+    return;
+  }
+
+  const token = getToken();
+  if (!token) return;
+  btn.disabled = true;
+  btn.textContent = 'กำลังส่ง…';
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `ปิดงาน ${title}` }),
+    });
+    if (!res.ok) {
+      btn.textContent = res.status === 403 || res.status === 404 ? 'ไม่มีสิทธิ์' : `ล้มเหลว ${res.status}`;
+      btn.disabled = false;
+      return;
+    }
+    btn.textContent = 'ส่งแล้ว';
+    btn.closest('.task').style.opacity = '0.5';
+  } catch {
+    btn.textContent = 'ส่งไม่สำเร็จ';
+    btn.disabled = false;
+  }
 }
 
 // ── จับเวลาออกกำลังกาย ─────────────────────────────────────
