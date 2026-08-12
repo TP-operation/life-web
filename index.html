@@ -108,6 +108,54 @@
   </div>
 </section>
 
+<!-- เพิ่มงาน — สำหรับของที่รู้ชัดแล้วว่าเป็นงาน ใช้เวลาเท่าไร ส่งเมื่อไหร่
+     พับไว้เพราะใช้น้อยกว่ากล่อง inbox และไม่ควรมาบังของที่ใช้บ่อยกว่า -->
+<section class="card hidden" id="newTaskBox">
+  <details>
+    <summary style="font-weight:600; cursor:pointer">เพิ่มงานใหม่</summary>
+    <div style="margin-top:10px">
+      <label for="ntTitle">ชื่องาน</label>
+      <input id="ntTitle" type="text" placeholder="สั้น ๆ พอให้รู้ว่าคืออะไร">
+
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1 1 120px">
+          <label for="ntContext">ทำที่ไหน</label>
+          <select id="ntContext" style="width:100%; min-height:46px; font:inherit; padding:11px;
+                  border-radius:9px; border:1px solid var(--line); background:var(--bg); color:var(--fg)">
+            <option value="work">งานโรงงาน</option>
+            <option value="project">โปรเจค</option>
+            <option value="life">ชีวิต</option>
+          </select>
+        </div>
+        <div style="flex:1 1 90px">
+          <label for="ntEst">กี่ชั่วโมง</label>
+          <input id="ntEst" type="number" min="0.5" step="0.5" value="1" inputmode="decimal">
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1 1 140px">
+          <label for="ntDeadline">กำหนดส่ง</label>
+          <input id="ntDeadline" type="date">
+        </div>
+        <div style="flex:1 1 120px">
+          <label for="ntEnergy">ต้องใช้สมองแค่ไหน</label>
+          <select id="ntEnergy" style="width:100%; min-height:46px; font:inherit; padding:11px;
+                  border-radius:9px; border:1px solid var(--line); background:var(--bg); color:var(--fg)">
+            <option value="high">คิดหนัก</option>
+            <option value="low">ทำได้ตอนเหนื่อย</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="primary" id="ntSend" style="margin-top:12px">สร้างงาน</button>
+      <p class="muted" id="ntNote" style="margin:8px 0 0">
+        ชั่วโมงที่กรอกคือตัวที่ระบบใช้จัดลำดับ — ประเมินตามจริงดีกว่าประเมินให้สวย
+      </p>
+    </div>
+  </details>
+</section>
+
 <!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
 <section class="card hidden" id="inboxBox">
   <label for="inbox">โยนเข้ากล่อง</label>
@@ -329,9 +377,60 @@ function render(d) {
 
   $('plan').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
+  $('newTaskBox').classList.remove('hidden');
   $('inboxBox').classList.remove('hidden');
+  if (!$('ntDeadline').value) {
+    const d = new Date(Date.now() + 7 * 86400000);
+    $('ntDeadline').value = d.toISOString().slice(0, 10);
+  }
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
+
+// ── เพิ่มงานใหม่ ───────────────────────────────────────────
+// ค่า est มาจากเจ้าของโดยตรง ไม่ใช่การเดา — urgency ทั้งระบบยืนอยู่บนตัวนี้
+$('ntSend').onclick = async () => {
+  const title = $('ntTitle').value.trim();
+  if (!title) { $('ntNote').textContent = 'ยังไม่ได้ใส่ชื่องาน'; return; }
+  const token = getToken();
+  if (!token) return;
+
+  const body = [
+    `context: ${$('ntContext').value}`,
+    `est: ${$('ntEst').value}`,
+    `deadline: ${$('ntDeadline').value}`,
+    `energy: ${$('ntEnergy').value}`,
+  ].join('\n');
+
+  const btn = $('ntSend');
+  btn.disabled = true;
+  btn.textContent = 'กำลังสร้าง…';
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `เพิ่มงาน ${title}`, body }),
+    });
+    if (!res.ok) {
+      $('ntNote').textContent = res.status === 403 || res.status === 404
+        ? 'โทเคนนี้เปิด issue ไม่ได้ — ต้องมีสิทธิ์ Issues: Read and write'
+        : `สร้างไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+    const issue = await res.json();
+    $('ntTitle').value = '';
+    // ถ้าค่าที่กรอกไม่ผ่านการตรวจฝั่ง repo issue จะไม่ถูกปิดและมีคอมเมนต์บอกเหตุผล
+    $('ntNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กด <b>รีเฟรช</b> อีกครั้งในสักครู่เพื่อดูงานใหม่`;
+  } catch (e) {
+    $('ntNote').textContent = `สร้างไม่สำเร็จ — ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'สร้างงาน';
+  }
+};
 
 // ── ปิดงาน ─────────────────────────────────────────────────
 // เปิด issue "ปิดงาน <ชื่อ>" แทนการแก้ไฟล์ตรง ๆ ด้วยเหตุผลเดียวกับกล่อง inbox:
