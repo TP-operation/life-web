@@ -33,8 +33,10 @@
   }
   button.primary{background:var(--accent); color:#fff; border-color:transparent; width:100%; font-size:1.05rem}
   button:active{transform:translateY(1px)}
-  input{font:inherit; padding:11px; border-radius:9px; border:1px solid var(--line);
+  input,textarea{font:inherit; padding:11px; border-radius:9px; border:1px solid var(--line);
         background:var(--bg); color:var(--fg); width:100%; min-height:46px}
+  textarea{resize:vertical; line-height:1.5}
+  code{background:var(--bg); padding:1px 5px; border-radius:5px; font-size:.85em}
   label{display:block; margin-bottom:6px; font-weight:600; font-size:.9rem}
   .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
   .cap{display:flex; gap:10px; flex-wrap:wrap; margin-top:8px}
@@ -82,6 +84,16 @@
   <div class="cap" id="cap"></div>
   <button class="primary" id="speak" style="margin-top:12px">🔊 อ่านให้ฟัง</button>
   <p class="muted" style="margin:8px 0 0" id="voiceInfo">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
+</section>
+
+<!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
+<section class="card hidden" id="inboxBox">
+  <label for="inbox">โยนเข้ากล่อง</label>
+  <textarea id="inbox" rows="3" placeholder="นึกอะไรออก พิมพ์ทิ้งไว้ก่อน ไม่ต้องจัดโครง"></textarea>
+  <button class="primary" id="send" style="margin-top:8px">ส่งเข้ากล่อง</button>
+  <p class="muted" id="inboxNote" style="margin:8px 0 0">
+    เก็บเข้า <code>10-inbox/</code> ภายในไม่กี่วินาที · ห้ามใส่เลข batch หรือรหัสเอกสารของโรงงาน
+  </p>
 </section>
 
 <section id="tasks"></section>
@@ -191,8 +203,56 @@ function render(d) {
       </div>`).join('');
 
   $('plan').classList.remove('hidden');
+  $('inboxBox').classList.remove('hidden');
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
+
+// ── โยนเข้ากล่อง ───────────────────────────────────────────
+// เปิด issue แทนการเขียนไฟล์ตรง ๆ — โทเคนบนเครื่องที่ทำงานจึงแตะเนื้อ repo ไม่ได้เลย
+// workflow inbox-collect เป็นคนย้ายเข้า 10-inbox/ แล้วปิด issue ให้
+$('send').onclick = async () => {
+  const text = $('inbox').value.trim();
+  if (!text) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('send');
+  btn.disabled = true;
+  btn.textContent = 'กำลังส่ง…';
+  const lines = text.split('\n');
+  const title = lines[0].slice(0, 80);
+  const body = lines.slice(1).join('\n').trim();
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title, body }),
+    });
+
+    if (res.status === 403 || res.status === 404) {
+      $('inboxNote').innerHTML = '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องเพิ่มสิทธิ์ Issues: Read and write ในหน้า fine-grained token';
+      return;
+    }
+    if (!res.ok) {
+      $('inboxNote').textContent = `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+
+    const issue = await res.json();
+    $('inbox').value = '';
+    $('inboxNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กำลังเก็บเข้ากล่อง`;
+  } catch (e) {
+    $('inboxNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ส่งเข้ากล่อง';
+  }
+};
 
 $('connect').onclick = () => {
   const v = $('pat').value.trim();
