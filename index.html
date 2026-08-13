@@ -188,6 +188,7 @@
 </section>
 
 <section id="tasks"></section>
+<section id="drafts"></section>
 <section id="week"></section>
 
 <footer>
@@ -413,6 +414,7 @@ function render(d) {
     const d = new Date(Date.now() + 7 * 86400000);
     $('ntDeadline').value = d.toISOString().slice(0, 10);
   }
+  renderDrafts(d.drafts ?? []);
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
 
@@ -600,6 +602,58 @@ async function closeTask(btn) {
     btn.closest('.task').style.opacity = '0.5';
   } catch {
     btn.textContent = 'ส่งไม่สำเร็จ';
+    btn.disabled = false;
+  }
+}
+
+// ── งานที่รอยืนยัน ─────────────────────────────────────────
+// agent เดามาจากกล่องเมื่อคืน ยังไม่เข้าลำดับจนกว่าเจ้าของจะยืนยัน
+// เพราะ est ที่โมเดลเดาผิดจะทำให้ urgency ของทั้งระบบเพี้ยน
+function renderDrafts(drafts) {
+  if (!drafts.length) { $('drafts').innerHTML = ''; return; }
+  const TH = { work: 'งานโรงงาน', project: 'โปรเจค', life: 'ชีวิต' };
+  $('drafts').innerHTML = `
+    <div class="card">
+      <strong>รอยืนยัน ${drafts.length} งาน</strong>
+      <p class="muted" style="margin:2px 0 10px">agent เดามาจากกล่องเมื่อคืน · ตัวเลขชั่วโมงเป็นการเดา แก้ใน Obsidian ก่อนยืนยันได้</p>
+      ${drafts.map((t) => `
+        <div class="task">
+          <h3>${esc(t.title)}</h3>
+          <div>
+            <span class="badge">${TH[t.context] ?? t.context ?? '—'}</span>
+            <span class="badge">เดาว่า ${t.est ?? '?'} ชม.</span>
+            <span class="badge">ส่ง ${t.deadline ?? '?'}</span>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="draft-btn primary" data-act="ยืนยันงาน" data-task="${esc(t.title)}" style="flex:1; min-height:40px; font-size:.9rem">ยืนยัน</button>
+            <button class="draft-btn" data-act="ทิ้งงาน" data-task="${esc(t.title)}" style="min-height:40px; font-size:.9rem">ทิ้ง</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  for (const b of document.querySelectorAll('.draft-btn')) b.onclick = () => actOnDraft(b);
+}
+
+async function actOnDraft(btn) {
+  const token = getToken();
+  if (!token) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'กำลังส่ง…';
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `${btn.dataset.act} ${btn.dataset.task}` }),
+    });
+    if (!res.ok) { btn.textContent = `ล้มเหลว ${res.status}`; btn.disabled = false; return; }
+    btn.textContent = 'ส่งแล้ว';
+    btn.closest('.task').style.opacity = '0.5';
+  } catch {
+    btn.textContent = label;
     btn.disabled = false;
   }
 }
