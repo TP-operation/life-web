@@ -88,6 +88,16 @@
   <p class="muted" style="margin:8px 0 0" id="voiceInfo">กดก่อนออกรถ แล้ววางมือถือลงได้เลย</p>
 </section>
 
+<!-- โอทีวันนี้ — กรอกเองเพราะตารางบอกได้แค่แผน ไม่ใช่สิ่งที่เกิดขึ้นจริง -->
+<section class="card hidden" id="otBox">
+  <div class="row" style="justify-content:space-between; align-items:baseline">
+    <strong>โอทีวันนี้</strong>
+    <span class="muted" id="otState"></span>
+  </div>
+  <div class="row" id="otCards" style="margin-top:8px"></div>
+  <p class="muted" style="margin:8px 0 0">กด 0 ก็มีความหมาย — บอกว่าวันนี้ไม่ได้ทำ ต่างจากวันที่ยังไม่ได้กรอก</p>
+</section>
+
 <!-- จับเวลาออกกำลังกาย — กิจกรรมเดียวที่ระบบจับเวลา -->
 <section class="card hidden" id="timerBox">
   <div class="row" style="justify-content:space-between; align-items:baseline">
@@ -314,6 +324,11 @@ function renderWeek(w) {
           <b>${w.actual?.exercise ?? 0} ชม.</b>
           <span class="muted">${w.actual?.sessions ?? 0} ครั้ง · เป้า ${w.targets?.exercise?.min}</span>
         </div>
+        <div style="border-color:var(--accent)">
+          <span class="muted">โอทีจริงเดือนนี้</span>
+          <b>${w.actual?.otMonth ?? 0} ชม.</b>
+          <span class="muted">เป้า ${w.targets?.otMonthly?.min}–${w.targets?.otMonthly?.max} · สัปดาห์นี้ ${w.actual?.otWeek ?? 0} ชม. จาก ${w.actual?.otDaysLogged ?? 0} วันที่กรอก</span>
+        </div>
       </div>
 
       ${trendBlock}
@@ -361,6 +376,7 @@ function render(d) {
   $('cap').innerHTML = [
     ['งานโรงงาน', c.work], ['โปรเจค', c.project], ['ชีวิต', c.life],
   ].map(([k, v]) => `<div><span class="muted">${k}</span><b>${v} ชม.</b></div>`).join('');
+  paintOtCards();
 
   const TH = { work: 'งานโรงงาน', project: 'โปรเจค', life: 'ชีวิต' };
   const ST = { safe: 'พอไหว', warning: 'เริ่มตึง', critical: 'ต้องลงมือแล้ว', overdue: 'เลยกำหนด', impossible: 'ไม่มีเวลาเหลือ' };
@@ -388,6 +404,7 @@ function render(d) {
   }
 
   $('plan').classList.remove('hidden');
+  $('otBox').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
   $('askBox').classList.remove('hidden');
   $('newTaskBox').classList.remove('hidden');
@@ -584,6 +601,51 @@ async function closeTask(btn) {
   } catch {
     btn.textContent = 'ส่งไม่สำเร็จ';
     btn.disabled = false;
+  }
+}
+
+// ── โอทีวันนี้ ─────────────────────────────────────────────
+// ตารางบอกได้แค่ว่า "วันอังคารมี OT 2 ชม." ซึ่งเป็นแผน ไม่ใช่สิ่งที่เกิดขึ้น
+// ตัวเลขที่ไม่ตรงความจริงแย่กว่าไม่มีตัวเลข จึงต้องให้เจ้าของกดเอง
+const OT_CHOICES = [0, 0.5, 1, 1.5, 2, 2.5, 3];
+
+function paintOtCards(current = null) {
+  $('otCards').innerHTML = OT_CHOICES.map((h) => `
+    <button class="ot-card" data-h="${h}" style="flex:1 1 60px; min-height:52px; padding:8px 4px;
+      ${current === h ? 'background:var(--accent); color:#fff; border-color:transparent' : ''}">
+      ${h}<span style="font-size:.7rem; opacity:.75"> ชม.</span>
+    </button>`).join('');
+  for (const b of document.querySelectorAll('.ot-card')) {
+    b.onclick = () => saveOt(Number(b.dataset.h), b);
+  }
+}
+
+async function saveOt(hours, btn) {
+  const token = getToken();
+  if (!token) return;
+  const all = document.querySelectorAll('.ot-card');
+  for (const b of all) b.disabled = true;
+  $('otState').textContent = 'กำลังบันทึก…';
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `โอที ${hours} ชม.` }),
+    });
+    if (!res.ok) {
+      $('otState').textContent = res.status === 403 || res.status === 404 ? 'โทเคนไม่มีสิทธิ์' : `ล้มเหลว ${res.status}`;
+      return;
+    }
+    $('otState').textContent = `บันทึก ${hours} ชม. แล้ว`;
+    paintOtCards(hours);
+  } catch (e) {
+    $('otState').textContent = `บันทึกไม่สำเร็จ — ${e.message}`;
+  } finally {
+    for (const b of document.querySelectorAll('.ot-card')) b.disabled = false;
   }
 }
 
