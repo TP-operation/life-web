@@ -190,6 +190,7 @@
 <section id="tasks"></section>
 <section id="drafts"></section>
 <section id="week"></section>
+<section id="projects"></section>
 
 <footer>
   <div class="row">
@@ -203,6 +204,7 @@
 const REPO = 'TP-operation/life';
 const PATH = 'state/today.json';
 const WEEK_PATH = 'state/week.json';
+const PROJECTS_PATH = 'state/projects.json';
 const KEY  = 'life_pat';
 const TREND_LABEL = '8 สัปดาห์ล่าสุด';
 
@@ -248,6 +250,7 @@ async function load() {
 
   render(data);
   loadWeek(token);
+  loadProjects(token);
   resumeAsk(token);
 }
 
@@ -261,6 +264,73 @@ async function loadWeek(token) {
     if (!res.ok) return;
     renderWeek(JSON.parse(await res.text()));
   } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+// ---------- ชั้นโปรเจค ----------
+// อ่านอย่างเดียวโดยตั้งใจ — การเพิ่มหรือแก้โปรเจคเกิดที่บ้านใน Obsidian
+// ที่ทำงานต้องการแค่คำตอบว่า "ตอนนี้อะไรค้างอยู่บ้าง" ไม่ใช่ที่แก้ทะเบียน
+
+async function loadProjects(token) {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PROJECTS_PATH}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    renderProjects(JSON.parse(await res.text()));
+  } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+// สีของแถวตามสถานะ · ใช้คลาสเดิมของหน้านี้ ไม่เพิ่ม CSS ใหม่
+const P_CLASS = {
+  unknown: 'critical', 'no-next': 'critical', forgotten: 'critical',
+  stale: 'warning', running: 'safe', resting: '',
+};
+
+function renderProjects(d) {
+  const list = d.projects ?? [];
+  if (!list.length) { $('projects').innerHTML = ''; return; }
+
+  // INVARIANTS §6.4 — ข้อมูลจากคอมที่บ้านเก่า ต้องบอก ไม่ใช่โชว์เลขค้างเฉย ๆ
+  const age = d.sources?.local?.ageDays;
+  const staleBar = d.localScanIsStale
+    ? `<div class="task warning">ข้อมูลจากคอมที่บ้าน${
+        age === null || age === undefined ? 'ยังไม่เคยสแกนเลย' : `เก่า ${age} วัน`
+      } — ตัวเลข "ไม่ได้แตะมา" ของโปรเจคที่ไม่มี repo อาจไม่ตรง</div>`
+    : '';
+
+  const c = d.counts ?? {};
+  const needsDecision = (c['no-next'] ?? 0) + (c.forgotten ?? 0) + (c.unknown ?? 0);
+
+  const row = (p) => {
+    const days = p.daysSinceTouched === null || p.daysSinceTouched === undefined
+      ? 'ยังวัดไม่ได้'
+      : p.daysSinceTouched === 0 ? 'แตะวันนี้' : `ไม่ได้แตะมา ${p.daysSinceTouched} วัน`;
+    const dirty = p.git?.dirty ? `<span class="badge">ยังไม่ commit ${p.git.dirty}</span>` : '';
+    const ahead = p.git?.ahead ? `<span class="badge">ยังไม่ push ${p.git.ahead}</span>` : '';
+    return `
+      <div class="task ${P_CLASS[p.health?.code] ?? ''}">
+        <h3>${p.health?.icon ?? ''} ${esc(p.name)}</h3>
+        <div class="muted">${days} · ${esc(p.health?.label ?? '')}${dirty || ahead ? ' ' : ''}${dirty}${ahead}</div>
+        <div>${p.next ? esc(p.next) : '<span class="muted">ยังไม่มีงานถัดไปเขียนไว้</span>'}</div>
+      </div>`;
+  };
+
+  // "ไม่ได้ทำ" คือสถานะปกติ (INVARIANTS §6.1) — พาดหัวจึงเป็นการนับ ไม่ใช่การทวง
+  const head = needsDecision
+    ? `<span class="muted">${needsDecision} อันรอให้ตัดสินใจ · เดินอยู่ ${c.running ?? 0} · พัก ${c.resting ?? 0}</span>`
+    : `<span class="muted">เดินอยู่ ${c.running ?? 0} · นิ่ง ${c.stale ?? 0} · พัก ${c.resting ?? 0}</span>`;
+
+  $('projects').innerHTML = `
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <strong>โปรเจค</strong>
+        ${head}
+      </div>
+      ${staleBar}
+      <div style="margin-top:10px">${list.map(row).join('')}</div>
+      <p class="muted">แก้ทะเบียนได้ที่ <code>60-projects/</code> ใน Obsidian ที่บ้าน</p>
+    </div>`;
 }
 
 function renderWeek(w) {
@@ -427,7 +497,9 @@ const ASK_TIMEOUT_MS = 240000;
 // หนึ่งนาทีนานพอที่จะสลับไปทำอย่างอื่นหรือปิดแท็บ — พอกลับมาต้องได้คำตอบเหมือนเดิม
 const ASK_KEY = 'life_pending_ask';
 
-const esc = (s) => s.replace(/[<>&]/g, (m) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[m]));
+// ต้องหนี `"` ด้วย เพราะมันถูกใช้ใน data-task="..." ของปุ่มงาน draft
+// ชื่องานที่มีเครื่องหมายคำพูดจะทำให้ attribute ขาดกลางคัน
+const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (m) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]));
 
 function showAnswer(comments, issueNumber) {
   $('askNote').innerHTML = `ตอบเมื่อสักครู่ · เก็บเป็นโน้ตใน <code>30-knowledge/</code> แล้ว ·
