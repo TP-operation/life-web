@@ -178,6 +178,16 @@
 </section>
 
 <!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
+<section class="card hidden" id="dispatchBox">
+  <label for="dispatch">สั่งงานโปรเจค</label>
+  <textarea id="dispatch" rows="3" placeholder="สั่งเป็นภาษาคน — ระบบหาเองว่าเป็นงานของโปรเจคไหน"></textarea>
+  <div class="row" style="margin-top:8px"><button class="primary" id="sendDispatch">ส่งต่อ</button></div>
+  <p class="muted" id="dispatchNote" style="margin:8px 0 0">
+    ไปเปิด issue ให้ที่โปรเจคปลายทาง แล้ว agent ของโปรเจคนั้นรับช่วงต่อ ·
+    <strong>ยังไม่รองรับ store/plan/ops/intake</strong> — สั่งตรงที่ repo นั้น
+  </p>
+</section>
+
 <section class="card hidden" id="inboxBox">
   <label for="inbox">โยนเข้ากล่อง</label>
   <textarea id="inbox" rows="3" placeholder="นึกอะไรออก พิมพ์ทิ้งไว้ก่อน ไม่ต้องจัดโครง"></textarea>
@@ -479,6 +489,7 @@ function render(d) {
   $('timerBox').classList.remove('hidden');
   $('askBox').classList.remove('hidden');
   $('newTaskBox').classList.remove('hidden');
+  $('dispatchBox').classList.remove('hidden');
   $('inboxBox').classList.remove('hidden');
   if (!$('ntDeadline').value) {
     const d = new Date(Date.now() + 7 * 86400000);
@@ -867,6 +878,57 @@ $('timerSave').onclick = async () => {
 };
 
 paintTimer();
+
+// ── สั่งงานโปรเจค ──────────────────────────────────────────
+// ทางเดียวกับกล่อง inbox เป๊ะ ๆ คือเปิด issue แล้วให้ workflow ทำต่อ
+// ต่างกันแค่หัวข้อขึ้นต้นด้วย "สั่ง " ซึ่งเป็นตัวปลุก dispatch.yml
+//
+// ไม่ poll รอคำตอบแบบกล่องถาม AI เพราะการส่งต่อจบใน ~1 นาทีและผลไปโผล่ที่ repo ปลายทาง
+// ไม่ใช่ที่หน้านี้ — การนั่งรอตรงนี้จึงไม่ได้อะไรกลับมา
+$('sendDispatch').onclick = async () => {
+  const text = $('dispatch').value.trim();
+  if (!text) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('sendDispatch');
+  btn.disabled = true;
+  btn.textContent = 'กำลังส่ง…';
+  const lines = text.split('\n');
+  // หัวข้อต้องขึ้นต้นด้วย "สั่ง " ไม่งั้น dispatch.yml จะไม่ตื่น
+  const title = `สั่ง ${lines[0].slice(0, 80)}`;
+  const body = lines.slice(1).join('\n').trim();
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title, body }),
+    });
+
+    if (res.status === 403 || res.status === 404) {
+      $('dispatchNote').innerHTML = '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องเพิ่มสิทธิ์ Issues: Read and write ในหน้า fine-grained token';
+      return;
+    }
+    if (!res.ok) {
+      $('dispatchNote').textContent = `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+
+    const issue = await res.json();
+    $('dispatch').value = '';
+    $('dispatchNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กำลังหาว่าเป็นงานของโปรเจคไหน · <a href="https://github.com/${REPO}/issues/${issue.number}" target="_blank" rel="noopener">ดูผล</a>`;
+  } catch (e) {
+    $('dispatchNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ส่งต่อ';
+  }
+};
 
 // ── โยนเข้ากล่อง ───────────────────────────────────────────
 // เปิด issue แทนการเขียนไฟล์ตรง ๆ — โทเคนบนเครื่องที่ทำงานจึงแตะเนื้อ repo ไม่ได้เลย
