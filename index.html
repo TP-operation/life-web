@@ -59,7 +59,7 @@
   .badge.run{border-color:var(--accent); color:var(--accent)}
   .badge.model{border-color:var(--warn); color:var(--warn)}
   /* การ์ด agent — details ตัวเดียวจบ ไม่ต้องมี JS เปิดปิด และใช้ได้บนทุกเบราว์เซอร์ */
-  .aggrid{display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px; margin-bottom:14px}
+  .aggrid{display:grid; grid-template-columns:repeat(auto-fill, minmax(212px, 1fr)); gap:8px; margin-bottom:14px}
   .ag{background:var(--card); border-left:3px solid var(--line); border-radius:0 5px 5px 0}
   .ag > summary{display:flex; gap:9px; align-items:center; padding:8px 10px; cursor:pointer; list-style:none}
   .ag > summary::-webkit-details-marker{display:none}
@@ -73,11 +73,13 @@
   .ag .s{font-size:.7rem; color:var(--muted); font-family:var(--mono)}
   .ag.run .s{color:var(--accent)}
   .ag.bad .s{color:var(--crit)}
-  .face{width:30px; height:30px; border-radius:5px; flex-shrink:0; object-fit:cover; background:var(--bg)}
+  /* 44px ไม่ใช่ 30 — เล็กกว่านี้แล้วแยกไม่ออกว่าใครเป็นใคร ซึ่งเป็นเหตุผลเดียวที่รูปมีอยู่
+     object-fit:cover กันรูปที่ไม่ได้จัตุรัสเป๊ะบิด */
+  .face{width:44px; height:44px; border-radius:5px; flex-shrink:0; object-fit:cover; background:var(--bg)}
   .face.letter{display:flex; align-items:center; justify-content:center; font-family:var(--mono);
-               font-size:.85rem; color:var(--muted); border:1px solid var(--line)}
-  .noface{width:30px; flex-shrink:0; text-align:center; color:var(--line)}
-  .ag .det{padding:0 10px 10px 49px; font-size:.75rem}
+               font-size:1rem; color:var(--muted); border:1px solid var(--line)}
+  .noface{width:44px; flex-shrink:0; text-align:center; color:var(--line)}
+  .ag .det{padding:0 10px 10px 63px; font-size:.75rem}
   .cant{margin-top:5px; border-left:2px solid var(--warn); padding-left:8px}
   .cant ul{margin:3px 0 0; padding-left:16px}
   .cant li{margin-bottom:2px; color:var(--muted)}
