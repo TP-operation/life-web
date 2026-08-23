@@ -1,0 +1,34 @@
+name: checks
+
+# ด่านที่ต้องผ่านทุกครั้งที่มีของเข้า repo นี้
+#
+# ทำไมถึงมี: 22 ส.ค. 2026 โค้ดที่เพิ่มเข้ามาประกาศ `esc` ซ้ำกับของเดิม
+# ผลคือสคริปต์ทั้งไฟล์พัง ทั้งหน้าใช้ไม่ได้ และจับได้เพราะบังเอิญเปิดเบราว์เซอร์ดูเท่านั้น
+#
+# **ด่านนี้ต้องมาก่อน agent ที่เขียนโค้ดได้เสมอ** — ไม่มีด่าน = ปล่อยให้ agent
+# แก้ไฟล์เดียวที่ทั้งหน้าพึ่งพาอยู่ โดยไม่มีอะไรบอกว่ามันพัง
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: ด่านหน้าเว็บ
+        run: node checks.mjs --print
+
+      - name: เทสของด่านเอง
+        run: node --test checks.test.mjs
