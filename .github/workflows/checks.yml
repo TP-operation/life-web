@@ -31,4 +31,4 @@ jobs:
         run: node checks.mjs --print
 
       - name: เทสของด่านเอง
-        run: node --test checks.test.mjs
+        run: node --test checks.test.mjs format-question.test.cjs

@@ -1,0 +1,57 @@
+name: ปล่อยคิว
+
+# แยก "อนุมัติ" ออกจาก "เริ่ม" — เหมือนที่ทำใน repo `ebr`
+#
+#   เย็นนี้  เจ้าของติดป้าย `อนุมัติแล้ว` ด้วยมือ   ← ด่านคนอยู่ตรงนี้ที่เดียว
+#   05:50    ตัวนี้เปลี่ยนเป็น `พร้อมแก้` ทีละอัน
+#   ขับรถ    agent ทำงาน เปิด PR รอไว้
+#   17:00    รอบที่สอง
+#
+# ⚠️ ติดป้ายด้วย GITHUB_TOKEN ไม่สร้าง workflow run ใหม่ — `agent-implement`
+#    จึงตื่นด้วย `workflow_run` ที่ชี้มาที่ไฟล์นี้ ไม่ใช่ตื่นจากป้าย
+
+on:
+  schedule:
+    - cron: '50 22 * * *'   # 05:50 ICT
+    - cron: '0 10 * * *'    # 17:00 ICT
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: queue-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ปล่อยงานที่อนุมัติไว้แล้วหนึ่งอัน
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          busy=$(gh issue list --state open --label "พร้อมแก้" --json number -q '[.[].number] | join(", ")')
+          if [ -n "$busy" ]; then
+            echo "ยังมีงานติดป้าย 'พร้อมแก้' ค้างอยู่ (#$busy) — รอให้ตรวจก่อน ไม่ปล่อยเพิ่ม"
+            echo "ถ้าค้างนานผิดปกติ แปลว่า agent-implement ล้ม — ดูคอมเมนต์ใน issue นั้น แล้วถอดป้ายออกเพื่อปลดคิว"
+            exit 0
+          fi
+
+          n=$(gh issue list --state open --label "อนุมัติแล้ว" \
+                --json number,author --limit 20 \
+                -q "[.[] | select(.author.login == \"$OWNER\")] | sort_by(.number) | .[0].number // empty")
+
+          if [ -z "$n" ]; then
+            echo "ไม่มีงานที่ติดป้าย 'อนุมัติแล้ว' รออยู่ — เป็นสถานะปกติ"
+            exit 0
+          fi
+
+          gh issue edit "$n" --remove-label "อนุมัติแล้ว" --add-label "พร้อมแก้"
+          gh issue comment "$n" --body "ปล่อยจากคิวเมื่อ $(TZ=Asia/Bangkok date '+%Y-%m-%d %H:%M') — agent กำลังลงมือ ผลจะมาเป็น PR"
+          echo "ปล่อย issue #$n"
