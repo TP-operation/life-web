@@ -53,6 +53,11 @@
   .spark div{flex:1; background:var(--accent); border-radius:3px 3px 0 0; min-height:2px}
   .err{border-color:var(--crit); background:var(--crit-bg)}
   .stale{border-color:var(--warn); background:var(--warn-bg)}
+  /* สถานะของ agent — ใช้ .badge ที่มีอยู่ เพิ่มแค่สี ไม่สร้างคำศัพท์ใหม่ */
+  .badge.ok{border-color:var(--safe); color:var(--safe)}
+  .badge.bad{border-color:var(--crit); color:var(--crit)}
+  .badge.run{border-color:var(--accent); color:var(--accent)}
+  .badge.model{border-color:var(--warn); color:var(--warn)}
   .hidden{display:none}
   footer{margin-top:18px; font-size:.8rem; color:var(--muted)}
 
@@ -158,6 +163,7 @@
 <nav class="tabs hidden" id="tabs">
   <button data-tab="today" class="on">วันนี้</button>
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
+  <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
   <button data-tab="log">บันทึก</button>
   <button data-tab="do">สั่งงาน</button>
 </nav>
@@ -301,6 +307,7 @@
 <section id="drafts"></section>
 <section id="week"></section>
 <section id="projects"></section>
+<section id="agents"></section>
 
 <footer>
   <div class="row">
@@ -998,9 +1005,151 @@ paintTimer();
 //
 // วิธีนี้ประกอบกับของเดิมได้พอดี: แท็บที่ไม่ได้เลือกตั้ง display:none ตรง ๆ
 // ส่วนแท็บที่เลือกตั้งเป็นค่าว่าง แล้วปล่อยให้คลาส `hidden` เดิมตัดสินต่อ
+// ── agent ทำอะไรอยู่ ───────────────────────────────────────
+//
+// เลื่อนทำมาตั้งแต่ 23 ส.ค. 2026 โดยตั้งใจ ตอนนั้นมี agent ที่รันเองแค่ 2 ครั้ง/สัปดาห์
+// หน้าจอจะว่างเกือบตลอด · เงื่อนไขที่เขียนไว้ในกล่องคือ "กลับมาดูใหม่เมื่อเกิน 2 ครั้ง/สัปดาห์
+// หรือมีงานเดินขนานกันจนจำไม่ไหว" · ตอนนี้เป็น 58 ครั้ง/สัปดาห์ ใน 3 repo หลังทำคิวขับรถเสร็จ
+//
+// ⚠️ ยิงสดจาก API ไม่ใช่อ่านไฟล์ที่ commit ไว้ — ต่างจากส่วนอื่นของหน้านี้โดยตั้งใจ
+//    "กำลังรันอยู่" ที่มาจากไฟล์ซึ่ง commit ทุก 30 นาที คือคำตอบที่เก่าได้ถึง 30 นาที
+//    และ cron ทุก 30 นาทีจะสร้าง commit ขยะวันละ 48 อัน (INVARIANTS §2.5)
+//
+// ⚠️ repo ของบัญชีที่ทำงานไม่อยู่ในรายการนี้และห้ามใส่เข้ามา — โทเคนของเราต้องไม่ถูกส่ง
+//    ไปที่ repo บัญชีอื่นแม้แต่คำขอเดียว (INVARIANTS §8.5) ฝั่งนั้นมี ops เฝ้าอยู่แล้ว
+const AGENT_REPOS = ['TP-operation/life', 'TP-operation/ebr', 'TP-operation/life-web'];
+
+// workflow ที่เรียกโมเดล = กินโควต้าก้อนเดียวกับที่เจ้าของใช้เอง จึงเป็นเลขที่ต้องเห็น
+// ตัวที่ไม่อยู่ในสองรายการนี้จะถูกป้ายว่า "ยังไม่รู้จัก" เพื่อให้ workflow ใหม่
+// ไม่หายเข้าไปในกองเงียบ ๆ แล้วทำให้ตัวเลขโควต้าต่ำกว่าความจริง
+const MODEL_WORKFLOWS = new Set([
+  'ถามตอบความรู้', 'คัดแยกกล่อง', 'กวาดโปรเจค', 'สรุปสัปดาห์', 'สั่งงาน',
+  'คัดกรองงาน', 'ลงมือแก้', 'ตรวจ PR',
+]);
+const LAYER_A_WORKFLOWS = new Set([
+  'checks', 'daily-plan', 'inbox-collect', 'ปล่อยคิว', 'pages-build-deployment',
+]);
+
+const agentsState = { loading: false, loaded: false };
+
+function fmtAgo(iso) {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms)) return '';
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'เมื่อครู่';
+  if (m < 60) return `${m} นาทีที่แล้ว`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} ชม.ที่แล้ว`;
+  return `${Math.round(h / 24)} วันที่แล้ว`;
+}
+
+function fmtDur(from, to) {
+  const ms = Date.parse(to ?? new Date().toISOString()) - Date.parse(from);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} วิ` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} นาที`;
+}
+
+async function loadAgents() {
+  const token = getToken();
+  if (!token || agentsState.loading) return;
+  agentsState.loading = true;
+  $('agents').innerHTML = '<div class="rule">agent</div><div class="task muted">กำลังถาม GitHub…</div>';
+
+  const results = await Promise.all(AGENT_REPOS.map(async (repo) => {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=40`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        cache: 'no-store',
+      });
+      if (!r.ok) return { repo, error: r.status };
+      const j = await r.json();
+      return { repo, runs: j.workflow_runs ?? [] };
+    } catch (e) {
+      return { repo, error: e.message };
+    }
+  }));
+
+  agentsState.loading = false;
+  agentsState.loaded = true;
+  renderAgents(results);
+}
+
+function renderAgents(results) {
+  const runs = [];
+  const broken = [];
+  for (const r of results) {
+    if (r.error !== undefined) broken.push(r);
+    else for (const w of r.runs) runs.push({ ...w, shortRepo: r.repo.split('/')[1] });
+  }
+  const startedAt = (r) => r.run_started_at ?? r.created_at;
+  runs.sort((a, b) => Date.parse(startedAt(b)) - Date.parse(startedAt(a)));
+
+  // 403/404 ที่นี่แปลได้อย่างเดียวว่าโทเคนไม่มีสิทธิ์อ่าน Actions — บอกวิธีแก้ ไม่ใช่แค่เลข
+  const errBar = broken.map((b) => {
+    const why = b.error === 403 || b.error === 404
+      ? 'โทเคนยังไม่มีสิทธิ์ <b>Actions: Read-only</b> ที่ repo นี้ — เพิ่มในหน้า PAT แล้วโหลดใหม่'
+      : `อ่านไม่ได้ (${esc(String(b.error))})`;
+    return `<div class="task warning">${esc(b.repo)} — ${why}</div>`;
+  }).join('');
+
+  const live = runs.filter((r) => r.status === 'in_progress' || r.status === 'queued');
+  const week = runs.filter((r) => Date.now() - Date.parse(startedAt(r)) < 7 * 864e5);
+  const model = week.filter((r) => MODEL_WORKFLOWS.has(r.name));
+  const failed = week.filter((r) => r.conclusion === 'failure');
+  const unknown = [...new Set(
+    week.filter((r) => !MODEL_WORKFLOWS.has(r.name) && !LAYER_A_WORKFLOWS.has(r.name)).map((r) => r.name),
+  )];
+
+  const badge = (r) => {
+    if (r.status === 'in_progress') return '<span class="badge run">กำลังรัน</span>';
+    if (r.status === 'queued') return '<span class="badge run">รอคิว</span>';
+    if (r.conclusion === 'success') return '<span class="badge ok">ผ่าน</span>';
+    if (r.conclusion === 'failure') return '<span class="badge bad">ล้ม</span>';
+    return `<span class="badge">${esc(r.conclusion ?? r.status ?? '')}</span>`;
+  };
+
+  const row = (r) => `<div class="task${r.conclusion === 'failure' ? ' critical' : ''}">
+      <h3>${badge(r)}${MODEL_WORKFLOWS.has(r.name) ? '<span class="badge model">โมเดล</span>' : ''}${esc(r.name)}</h3>
+      <div class="muted">${esc(r.shortRepo)} · ${fmtAgo(startedAt(r))} · ${fmtDur(startedAt(r), r.status === 'completed' ? r.updated_at : null)}
+      · <a href="${esc(r.html_url ?? '')}" target="_blank" rel="noopener">log</a></div>
+    </div>`;
+
+  // ตัวเลขที่นี่คือข้อเท็จจริงว่าเครื่องทำอะไรไป **ไม่ใช่คะแนนของเจ้าของ**
+  // จึงไม่มีเป้า ไม่มีการเทียบกับสัปดาห์ก่อน ไม่มีเครื่องหมายตกใจ (INVARIANTS §6.1)
+  const summary = `<div class="cap">
+      <div><b>${week.length}</b>รอบใน 7 วัน</div>
+      <div><b>${model.length}</b>เรียกโมเดล</div>
+      <div><b>${failed.length}</b>ล้ม</div>
+    </div>`;
+
+  const unknownBar = unknown.length
+    ? `<div class="task warning">ยังไม่รู้จัก: ${unknown.map(esc).join(' · ')}
+       <div class="muted">ถ้าตัวไหนเรียกโมเดล ต้องเพิ่มชื่อลง <code>MODEL_WORKFLOWS</code> ไม่งั้นเลขโควต้าจะต่ำกว่าจริง</div></div>`
+    : '';
+
+  const n = $('tabAgentsN');
+  if (n) n.textContent = live.length ? String(live.length) : '';
+
+  $('agents').innerHTML = `
+    <div class="rule">กำลังทำอยู่</div>
+    ${errBar}
+    ${live.length ? live.map(row).join('') : '<div class="task muted">ไม่มีอะไรรันอยู่</div>'}
+    <div class="rule">เจ็ดวันที่ผ่านมา</div>
+    ${summary}
+    ${unknownBar}
+    <div class="rule">ล่าสุด</div>
+    ${runs.slice(0, 20).map(row).join('') || '<div class="task muted">ยังไม่มีรอบไหนเลย</div>'}
+    <div class="row" style="margin-top:10px"><button id="reloadAgents">โหลดใหม่</button></div>`;
+
+  const btn = $('reloadAgents');
+  if (btn) btn.onclick = loadAgents;
+}
+
 const TABS = {
   today:    ['plan', 'tasks', 'drafts'],
   projects: ['projects'],
+  agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
   do:       ['askBox', 'newTaskBox', 'dispatchBox', 'inboxBox'],
 };
@@ -1020,6 +1169,9 @@ function showTab(name) {
     b.classList.toggle('on', b.dataset.tab === tab);
   }
   localStorage.setItem(TAB_KEY, tab);
+
+  // โหลดตอนกดเข้าแท็บเท่านั้น — คนที่ไม่เคยเปิดดูไม่ควรเสียโควต้า API ทุกครั้งที่เปิดหน้า
+  if (tab === 'agents' && !agentsState.loaded) loadAgents();
 }
 
 for (const b of document.querySelectorAll('nav.tabs button')) {
