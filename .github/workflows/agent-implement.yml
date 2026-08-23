@@ -232,8 +232,15 @@ jobs:
             exit 0
           fi
 
-          body_file=.pr-body.md
-          [ -s "$body_file" ] || echo "agent ไม่ได้เขียนคำอธิบาย PR" > "$body_file"
+          # ⚠️ ย้ายออกนอก repo **ก่อน** `git add -A` ไม่งั้นมันติดไปกับ commit ทุกครั้ง
+          # เกิดขึ้นจริงที่ ebr PR #3 — ไฟล์ชั่วคราวของ agent กลายเป็นไฟล์ใน repo
+          # ที่ผู้ตรวจต้องมาทักให้ลบ ทุก PR
+          body_file="$RUNNER_TEMP/pr-body.md"
+          if [ -s .pr-body.md ]; then
+            mv .pr-body.md "$body_file"
+          else
+            echo "agent ไม่ได้เขียนคำอธิบาย PR" > "$body_file"
+          fi
           {
             echo
             echo "---"
@@ -263,8 +270,8 @@ jobs:
               printf 'สิ่งที่ gh ตอบกลับมา\n\n    %s\n\n' "$url"
               printf 'ถ้าเป็น *not permitted to create or approve pull requests* ให้เปิดสวิตช์ที่\n'
               printf 'Settings → Actions → General → Workflow permissions → **Allow GitHub Actions to create and approve pull requests**\n'
-            } > .pr-failed.md
-            gh issue comment "$ISSUE" --body-file .pr-failed.md
+            } > "$RUNNER_TEMP/pr-failed.md"
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/pr-failed.md"
           fi
 
       - name: แจ้งเมื่อล้ม
