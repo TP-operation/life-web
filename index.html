@@ -58,6 +58,29 @@
   .badge.bad{border-color:var(--crit); color:var(--crit)}
   .badge.run{border-color:var(--accent); color:var(--accent)}
   .badge.model{border-color:var(--warn); color:var(--warn)}
+  /* การ์ด agent — details ตัวเดียวจบ ไม่ต้องมี JS เปิดปิด และใช้ได้บนทุกเบราว์เซอร์ */
+  .aggrid{display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px; margin-bottom:14px}
+  .ag{background:var(--card); border-left:3px solid var(--line); border-radius:0 5px 5px 0}
+  .ag > summary{display:flex; gap:9px; align-items:center; padding:8px 10px; cursor:pointer; list-style:none}
+  .ag > summary::-webkit-details-marker{display:none}
+  .ag.run{border-left-color:var(--accent); background:var(--card)}
+  .ag.ok{border-left-color:var(--safe)}
+  .ag.bad{border-left-color:var(--crit); background:var(--crit-bg)}
+  .ag.off{opacity:.55}
+  .ag .txt{min-width:0; display:flex; flex-direction:column; gap:1px}
+  .ag .n{font-size:.9rem}
+  .ag .w{font-size:.7rem; color:var(--muted)}
+  .ag .s{font-size:.7rem; color:var(--muted); font-family:var(--mono)}
+  .ag.run .s{color:var(--accent)}
+  .ag.bad .s{color:var(--crit)}
+  .face{width:30px; height:30px; border-radius:5px; flex-shrink:0; object-fit:cover; background:var(--bg)}
+  .face.letter{display:flex; align-items:center; justify-content:center; font-family:var(--mono);
+               font-size:.85rem; color:var(--muted); border:1px solid var(--line)}
+  .noface{width:30px; flex-shrink:0; text-align:center; color:var(--line)}
+  .ag .det{padding:0 10px 10px 49px; font-size:.75rem}
+  .cant{margin-top:5px; border-left:2px solid var(--warn); padding-left:8px}
+  .cant ul{margin:3px 0 0; padding-left:16px}
+  .cant li{margin-bottom:2px; color:var(--muted)}
   .hidden{display:none}
   footer{margin-top:18px; font-size:.8rem; color:var(--muted)}
 
@@ -1008,29 +1031,40 @@ paintTimer();
 // ── agent ทำอะไรอยู่ ───────────────────────────────────────
 //
 // เลื่อนทำมาตั้งแต่ 23 ส.ค. 2026 โดยตั้งใจ ตอนนั้นมี agent ที่รันเองแค่ 2 ครั้ง/สัปดาห์
-// หน้าจอจะว่างเกือบตลอด · เงื่อนไขที่เขียนไว้ในกล่องคือ "กลับมาดูใหม่เมื่อเกิน 2 ครั้ง/สัปดาห์
-// หรือมีงานเดินขนานกันจนจำไม่ไหว" · ตอนนี้เป็น 58 ครั้ง/สัปดาห์ ใน 3 repo หลังทำคิวขับรถเสร็จ
+// เงื่อนไขที่บันทึกไว้คือ "กลับมาดูใหม่เมื่อเกิน 2 ครั้ง/สัปดาห์ หรือมีงานเดินขนานกัน
+// จนจำไม่ไหว" · ตอนนี้เป็น 58 ครั้ง/สัปดาห์ ใน 3 repo หลังทำคิวขับรถเสร็จ
 //
-// ⚠️ ยิงสดจาก API ไม่ใช่อ่านไฟล์ที่ commit ไว้ — ต่างจากส่วนอื่นของหน้านี้โดยตั้งใจ
+// ⚠️ ยิงสดจาก Actions API ไม่ใช่อ่านไฟล์ที่ commit ไว้ — ต่างจากส่วนอื่นของหน้านี้โดยตั้งใจ
 //    "กำลังรันอยู่" ที่มาจากไฟล์ซึ่ง commit ทุก 30 นาที คือคำตอบที่เก่าได้ถึง 30 นาที
-//    และ cron ทุก 30 นาทีจะสร้าง commit ขยะวันละ 48 อัน (INVARIANTS §2.5)
+//    และ cron ถี่ขนาดนั้นจะสร้าง commit ขยะวันละ 48 อัน (INVARIANTS §2.5)
 //
-// ⚠️ repo ของบัญชีที่ทำงานไม่อยู่ในรายการนี้และห้ามใส่เข้ามา — โทเคนของเราต้องไม่ถูกส่ง
-//    ไปที่ repo บัญชีอื่นแม้แต่คำขอเดียว (INVARIANTS §8.5) ฝั่งนั้นมี ops เฝ้าอยู่แล้ว
-const AGENT_REPOS = ['TP-operation/life', 'TP-operation/ebr', 'TP-operation/life-web'];
+// ⚠️ **ตัวตนของ agent มาจากทะเบียนใน repo private ไม่ได้ hardcode ที่นี่**
+//    ของเดิมมีรายชื่อ workflow ที่เรียกโมเดลฝังอยู่ในไฟล์นี้ ซึ่งเป็น repo **public**
+//    และหลุดจากของจริงได้ทุกเมื่อ · ตอนนี้ `70-agents/` เป็นแหล่งความจริงที่เดียว
+const AGENTS_PATH = 'state/agents.json';
 
-// workflow ที่เรียกโมเดล = กินโควต้าก้อนเดียวกับที่เจ้าของใช้เอง จึงเป็นเลขที่ต้องเห็น
-// ตัวที่ไม่อยู่ในสองรายการนี้จะถูกป้ายว่า "ยังไม่รู้จัก" เพื่อให้ workflow ใหม่
-// ไม่หายเข้าไปในกองเงียบ ๆ แล้วทำให้ตัวเลขโควต้าต่ำกว่าความจริง
-const MODEL_WORKFLOWS = new Set([
-  'ถามตอบความรู้', 'คัดแยกกล่อง', 'กวาดโปรเจค', 'สรุปสัปดาห์', 'สั่งงาน',
-  'คัดกรองงาน', 'ลงมือแก้', 'ตรวจ PR',
-]);
-const LAYER_A_WORKFLOWS = new Set([
-  'checks', 'daily-plan', 'inbox-collect', 'ปล่อยคิว', 'pages-build-deployment',
-]);
+// เจ้าของ repo ที่ส่งโทเคนไปได้ — repo ของบัญชีอื่นห้ามแตะแม้แต่คำขอเดียว
+// (INVARIANTS §8.5) ถ้าวันหนึ่งมีคนใส่ repo ฝั่งที่ทำงานลงทะเบียน ตัวนี้จะกันไว้เอง
+const AGENT_OWNER = 'TP-operation';
 
 const agentsState = { loading: false, loaded: false };
+
+const agentKey = (repo, workflow) => `${repo}::${workflow}`;
+
+/**
+ * markdown เท่าที่ข้อความในทะเบียนใช้จริง — ตัวหนา โค้ด และ wikilink
+ *
+ * ⚠️ **escape ก่อน แล้วค่อยใส่แท็ก** ลำดับนี้กลับไม่ได้ — ถ้าใส่แท็กก่อน
+ * ข้อความที่มี `<` จะกลายเป็น HTML จริง · ข้อความพวกนี้มาจาก repo private
+ * ที่เจ้าของเขียนเอง แต่การพึ่งความไว้ใจแทนการ escape คือนิสัยที่พังวันที่ผิดคน
+ */
+function mdLite(text) {
+  return esc(text)
+    .replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, '$1')
+    .replace(/\[\[([^\]]*)\]\]/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
 
 function fmtAgo(iso) {
   const ms = Date.now() - Date.parse(iso);
@@ -1050,97 +1084,198 @@ function fmtDur(from, to) {
   return s < 60 ? `${s} วิ` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} นาที`;
 }
 
+async function ghJson(url, token, accept) {
+  const r = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: accept },
+    cache: 'no-store',
+  });
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+  return r.json();
+}
+
 async function loadAgents() {
   const token = getToken();
   if (!token || agentsState.loading) return;
   agentsState.loading = true;
   $('agents').innerHTML = '<div class="rule">agent</div><div class="task muted">กำลังถาม GitHub…</div>';
 
-  const results = await Promise.all(AGENT_REPOS.map(async (repo) => {
+  // ทะเบียนมาก่อน — ถ้าไม่มีทะเบียนก็ไม่รู้ว่าตัวไหนคือใคร
+  let registry = null;
+  let regError = null;
+  try {
+    registry = await ghJson(
+      `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}`,
+      token, 'application/vnd.github.raw+json',
+    );
+  } catch (e) {
+    regError = e.status ?? e.message;
+  }
+
+  const repos = [...new Set((registry?.agents ?? []).flatMap((a) => a.repos ?? []))];
+  const mine = repos.filter((r) => r.startsWith(`${AGENT_OWNER}/`));
+  const foreign = repos.filter((r) => !r.startsWith(`${AGENT_OWNER}/`));
+
+  const results = await Promise.all(mine.map(async (repo) => {
     try {
-      const r = await fetch(`https://api.github.com/repos/${repo}/actions/runs?per_page=40`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-        cache: 'no-store',
-      });
-      if (!r.ok) return { repo, error: r.status };
-      const j = await r.json();
+      const j = await ghJson(
+        `https://api.github.com/repos/${repo}/actions/runs?per_page=40`,
+        token, 'application/vnd.github+json',
+      );
       return { repo, runs: j.workflow_runs ?? [] };
     } catch (e) {
-      return { repo, error: e.message };
+      return { repo, error: e.status ?? e.message };
     }
   }));
 
   agentsState.loading = false;
   agentsState.loaded = true;
-  renderAgents(results);
+  renderAgents({ registry, regError, results, foreign });
 }
 
-function renderAgents(results) {
-  const runs = [];
+function agentCard(a, run) {
+  const started = run ? (run.run_started_at ?? run.created_at) : null;
+  const live = run && (run.status === 'in_progress' || run.status === 'queued');
+  const failed = run && run.conclusion === 'failure';
+
+  let cls = 'ag off';
+  if (live) cls = 'ag run';
+  else if (failed) cls = 'ag bad';
+  else if (run) cls = 'ag ok';
+
+  const state = !run ? 'ยังไม่เคยรัน'
+    : live ? `▶ ${fmtDur(started, null)}`
+    : failed ? 'ล้ม'
+    : fmtDur(started, run.updated_at);
+
+  // สคริปต์ไม่มีหน้า — มันคำนวณ ไม่ได้ตัดสินอะไร ผลออกมาเหมือนเดิมทุกครั้ง
+  const face = a.kind !== 'agent'
+    ? '<span class="noface">▪</span>'
+    : a.portrait
+      ? `<img class="face" src="portraits/${esc(a.portrait)}" alt=""
+           onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'face letter',textContent:${esc(JSON.stringify((a.name ?? '?')[0]))}}))">`
+      : `<span class="face letter">${esc((a.name ?? '?')[0])}</span>`;
+
+  const title = a.kind === 'agent' ? esc(a.name ?? '') : esc(a.workflow);
+  const sub = a.kind === 'agent' ? esc(a.workflow) : 'สคริปต์';
+
+  // ข้อจำกัดอยู่บนการ์ดเดียวกับชื่อ ไม่ใช่ในเอกสารที่ไม่มีใครเปิด
+  // การให้ชื่อและหน้ากับ agent ทำให้เชื่อมันง่ายขึ้นโดยอัตโนมัติ นี่คือของถ่วง
+  const detail = [
+    a.trigger ? `<div class="muted">ตื่นเมื่อ ${mdLite(a.trigger)}</div>` : '',
+    a.model ? `<div class="muted">${esc(a.model)}</div>` : '',
+    a.cannot?.length
+      ? `<div class="cant"><b>ทำไม่ได้</b><ul>${a.cannot.map((c) => `<li>${mdLite(c)}</li>`).join('')}</ul></div>`
+      : '',
+    run ? `<div class="muted"><a href="${esc(run.html_url ?? '')}" target="_blank" rel="noopener">ดู log รอบล่าสุด</a></div>` : '',
+  ].join('');
+
+  return `<details class="${cls}">
+      <summary>${face}<span class="txt"><span class="n">${title}</span><span class="w">${sub}</span>
+        <span class="s">${esc(state)}${run && !live ? ` · ${fmtAgo(started)}` : ''}</span></span></summary>
+      <div class="det">${detail}</div>
+    </details>`;
+}
+
+function renderAgents({ registry, regError, results, foreign }) {
+  if (!registry) {
+    const why = regError === 404
+      ? 'ยังไม่มี state/agents.json — รอ daily-plan รอบถัดไป หรือรัน build-agents.mjs ที่บ้าน'
+      : regError === 403 ? 'โทเคนไม่มีสิทธิ์อ่าน repo นี้'
+      : `อ่านทะเบียนไม่ได้ (${esc(String(regError))})`;
+    $('agents').innerHTML = `<div class="rule">agent</div><div class="task warning">${why}</div>`;
+    return;
+  }
+
+  const byKey = new Map();
+  for (const a of registry.agents ?? []) {
+    for (const r of a.repos ?? []) byKey.set(agentKey(r, a.workflow), a);
+  }
+
+  const allRuns = [];
   const broken = [];
   for (const r of results) {
     if (r.error !== undefined) broken.push(r);
-    else for (const w of r.runs) runs.push({ ...w, shortRepo: r.repo.split('/')[1] });
+    else for (const w of r.runs) allRuns.push({ ...w, repo: r.repo });
   }
   const startedAt = (r) => r.run_started_at ?? r.created_at;
-  runs.sort((a, b) => Date.parse(startedAt(b)) - Date.parse(startedAt(a)));
+  allRuns.sort((a, b) => Date.parse(startedAt(b)) - Date.parse(startedAt(a)));
 
-  // 403/404 ที่นี่แปลได้อย่างเดียวว่าโทเคนไม่มีสิทธิ์อ่าน Actions — บอกวิธีแก้ ไม่ใช่แค่เลข
-  const errBar = broken.map((b) => {
+  // รอบล่าสุดของแต่ละ workflow ในแต่ละ repo
+  const latest = new Map();
+  for (const r of allRuns) {
+    const k = agentKey(r.repo, r.name);
+    if (!latest.has(k)) latest.set(k, r);
+  }
+
+  const week = allRuns.filter((r) => Date.now() - Date.parse(startedAt(r)) < 7 * 864e5);
+  const modelRuns = week.filter((r) => byKey.get(agentKey(r.repo, r.name))?.kind === 'agent');
+  const failed = week.filter((r) => r.conclusion === 'failure');
+  const live = allRuns.filter((r) => r.status === 'in_progress' || r.status === 'queued');
+
+  // workflow ที่รันจริงแต่ไม่มีในทะเบียน — ตาข่ายชั้นสองสำหรับตัวที่ถูกเพิ่มใน repo อื่น
+  const unknown = [...new Set(week.filter((r) => !byKey.has(agentKey(r.repo, r.name)))
+    .map((r) => `${r.repo.split('/')[1]} · ${r.name}`))];
+
+  const bars = [];
+  for (const b of broken) {
     const why = b.error === 403 || b.error === 404
       ? 'โทเคนยังไม่มีสิทธิ์ <b>Actions: Read-only</b> ที่ repo นี้ — เพิ่มในหน้า PAT แล้วโหลดใหม่'
       : `อ่านไม่ได้ (${esc(String(b.error))})`;
-    return `<div class="task warning">${esc(b.repo)} — ${why}</div>`;
-  }).join('');
+    bars.push(`<div class="task warning">${esc(b.repo)} — ${why}</div>`);
+  }
+  if (foreign.length) {
+    bars.push(`<div class="task critical">ทะเบียนมี repo ของบัญชีอื่น: ${foreign.map(esc).join(' · ')}
+      <div class="muted">ไม่ได้ถาม และห้ามถาม — โทเคนของเราต้องไม่ถูกส่งไปที่บัญชีอื่น (INVARIANTS §8.5)</div></div>`);
+  }
+  if (unknown.length) {
+    bars.push(`<div class="task warning">รันจริงแต่ไม่มีในทะเบียน: ${unknown.map(esc).join(' · ')}
+      <div class="muted">เพิ่มโน้ตใน <code>70-agents/</code> ไม่งั้นเลขที่นับว่าเรียกโมเดลจะต่ำกว่าจริง</div></div>`);
+  }
 
-  const live = runs.filter((r) => r.status === 'in_progress' || r.status === 'queued');
-  const week = runs.filter((r) => Date.now() - Date.parse(startedAt(r)) < 7 * 864e5);
-  const model = week.filter((r) => MODEL_WORKFLOWS.has(r.name));
-  const failed = week.filter((r) => r.conclusion === 'failure');
-  const unknown = [...new Set(
-    week.filter((r) => !MODEL_WORKFLOWS.has(r.name) && !LAYER_A_WORKFLOWS.has(r.name)).map((r) => r.name),
-  )];
+  // เรียง repo ให้ตัวที่มีอะไรเกิดขึ้นอยู่บน
+  const repos = [...new Set((registry.agents ?? []).flatMap((a) => a.repos ?? []))]
+    .filter((r) => r.startsWith(`${AGENT_OWNER}/`))
+    .map((repo) => {
+      const list = (registry.agents ?? [])
+        .filter((a) => (a.repos ?? []).includes(repo))
+        .map((a) => ({ a, run: latest.get(agentKey(repo, a.workflow)) ?? null }));
+      list.sort((x, y) => {
+        const rank = (o) => (o.run?.status === 'in_progress' ? 0
+          : o.run?.conclusion === 'failure' ? 1
+          : o.a.kind === 'agent' ? 2 : 3);
+        return rank(x) - rank(y);
+      });
+      return {
+        repo,
+        list,
+        live: list.filter((o) => o.run?.status === 'in_progress').length,
+        bad: list.filter((o) => o.run?.conclusion === 'failure').length,
+        runs: week.filter((r) => r.repo === repo).length,
+      };
+    })
+    .sort((a, b) => (b.live - a.live) || (b.bad - a.bad));
 
-  const badge = (r) => {
-    if (r.status === 'in_progress') return '<span class="badge run">กำลังรัน</span>';
-    if (r.status === 'queued') return '<span class="badge run">รอคิว</span>';
-    if (r.conclusion === 'success') return '<span class="badge ok">ผ่าน</span>';
-    if (r.conclusion === 'failure') return '<span class="badge bad">ล้ม</span>';
-    return `<span class="badge">${esc(r.conclusion ?? r.status ?? '')}</span>`;
+  const section = (s) => {
+    const note = s.live ? `รัน ${s.live}` : s.bad ? `ล้ม ${s.bad}` : 'ว่าง';
+    return `<div class="rule">${esc(s.repo.split('/')[1])}
+        <span class="muted">${note} · ${s.runs} รอบใน 7 วัน</span></div>
+      <div class="aggrid">${s.list.map((o) => agentCard(o.a, o.run)).join('')}</div>`;
   };
 
-  const row = (r) => `<div class="task${r.conclusion === 'failure' ? ' critical' : ''}">
-      <h3>${badge(r)}${MODEL_WORKFLOWS.has(r.name) ? '<span class="badge model">โมเดล</span>' : ''}${esc(r.name)}</h3>
-      <div class="muted">${esc(r.shortRepo)} · ${fmtAgo(startedAt(r))} · ${fmtDur(startedAt(r), r.status === 'completed' ? r.updated_at : null)}
-      · <a href="${esc(r.html_url ?? '')}" target="_blank" rel="noopener">log</a></div>
-    </div>`;
-
   // ตัวเลขที่นี่คือข้อเท็จจริงว่าเครื่องทำอะไรไป **ไม่ใช่คะแนนของเจ้าของ**
-  // จึงไม่มีเป้า ไม่มีการเทียบกับสัปดาห์ก่อน ไม่มีเครื่องหมายตกใจ (INVARIANTS §6.1)
-  const summary = `<div class="cap">
-      <div><b>${week.length}</b>รอบใน 7 วัน</div>
-      <div><b>${model.length}</b>เรียกโมเดล</div>
-      <div><b>${failed.length}</b>ล้ม</div>
-    </div>`;
-
-  const unknownBar = unknown.length
-    ? `<div class="task warning">ยังไม่รู้จัก: ${unknown.map(esc).join(' · ')}
-       <div class="muted">ถ้าตัวไหนเรียกโมเดล ต้องเพิ่มชื่อลง <code>MODEL_WORKFLOWS</code> ไม่งั้นเลขโควต้าจะต่ำกว่าจริง</div></div>`
-    : '';
-
+  // จึงไม่มีเป้า ไม่เทียบกับสัปดาห์ก่อน ไม่มีเครื่องหมายตกใจ (INVARIANTS §6.1)
   const n = $('tabAgentsN');
   if (n) n.textContent = live.length ? String(live.length) : '';
 
-  $('agents').innerHTML = `
-    <div class="rule">กำลังทำอยู่</div>
-    ${errBar}
-    ${live.length ? live.map(row).join('') : '<div class="task muted">ไม่มีอะไรรันอยู่</div>'}
-    <div class="rule">เจ็ดวันที่ผ่านมา</div>
-    ${summary}
-    ${unknownBar}
-    <div class="rule">ล่าสุด</div>
-    ${runs.slice(0, 20).map(row).join('') || '<div class="task muted">ยังไม่มีรอบไหนเลย</div>'}
-    <div class="row" style="margin-top:10px"><button id="reloadAgents">โหลดใหม่</button></div>`;
+  $('agents').innerHTML = `${bars.join('')}
+    <div class="cap">
+      <div><b>${week.length}</b>รอบใน 7 วัน</div>
+      <div><b>${modelRuns.length}</b>เรียกโมเดล</div>
+      <div><b>${failed.length}</b>ล้ม</div>
+    </div>
+    ${repos.map(section).join('')}
+    <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
+    <div class="row"><button id="reloadAgents">โหลดใหม่</button></div>`;
 
   const btn = $('reloadAgents');
   if (btn) btn.onclick = loadAgents;
