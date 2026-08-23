@@ -58,31 +58,49 @@
   .badge.bad{border-color:var(--crit); color:var(--crit)}
   .badge.run{border-color:var(--accent); color:var(--accent)}
   .badge.model{border-color:var(--warn); color:var(--warn)}
-  /* การ์ด agent — details ตัวเดียวจบ ไม่ต้องมี JS เปิดปิด และใช้ได้บนทุกเบราว์เซอร์ */
-  .aggrid{display:grid; grid-template-columns:repeat(auto-fill, minmax(212px, 1fr)); gap:8px; margin-bottom:14px}
-  .ag{background:var(--card); border-left:3px solid var(--line); border-radius:0 5px 5px 0}
-  .ag > summary{display:flex; gap:9px; align-items:center; padding:8px 10px; cursor:pointer; list-style:none}
-  .ag > summary::-webkit-details-marker{display:none}
-  .ag.run{border-left-color:var(--accent); background:var(--card)}
-  .ag.ok{border-left-color:var(--safe)}
-  .ag.bad{border-left-color:var(--crit); background:var(--crit-bg)}
-  .ag.off{opacity:.55}
-  .ag .txt{min-width:0; display:flex; flex-direction:column; gap:1px}
-  .ag .n{font-size:.9rem}
-  .ag .w{font-size:.7rem; color:var(--muted)}
-  .ag .s{font-size:.7rem; color:var(--muted); font-family:var(--mono)}
-  .ag.run .s{color:var(--accent)}
-  .ag.bad .s{color:var(--crit)}
-  /* 44px ไม่ใช่ 30 — เล็กกว่านี้แล้วแยกไม่ออกว่าใครเป็นใคร ซึ่งเป็นเหตุผลเดียวที่รูปมีอยู่
-     object-fit:cover กันรูปที่ไม่ได้จัตุรัสเป๊ะบิด */
-  .face{width:44px; height:44px; border-radius:5px; flex-shrink:0; object-fit:cover; background:var(--bg)}
-  .face.letter{display:flex; align-items:center; justify-content:center; font-family:var(--mono);
-               font-size:1rem; color:var(--muted); border:1px solid var(--line)}
-  .noface{width:44px; flex-shrink:0; text-align:center; color:var(--line)}
-  .ag .det{padding:0 10px 10px 63px; font-size:.75rem}
-  .cant{margin-top:5px; border-left:2px solid var(--warn); padding-left:8px}
-  .cant ul{margin:3px 0 0; padding-left:16px}
-  .cant li{margin-bottom:2px; color:var(--muted)}
+  /* การ์ด agent — รูปคือการ์ด รายละเอียดอยู่หลังการ์ด
+     พลิกด้วย class ไม่ใช่ details เพราะ details ซ่อนเนื้อในแบบที่ทับด้วย CSS ไม่ได้จริง
+     ทั้งใบเป็น role=button ปุ่มจริงใส่ <a> ข้างในไม่ได้ และลิงก์ไป log คือสิ่งที่อยากกดที่สุดตอนมันล้ม */
+  .agdeck{display:grid; grid-template-columns:repeat(auto-fill, minmax(158px, 1fr)); gap:10px; margin-bottom:16px}
+  .agc{position:relative; perspective:900px; cursor:pointer}
+  .agc:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:9px}
+  .flip{display:block; position:relative; transform-style:preserve-3d; transition:transform .45s ease}
+  .agc[aria-expanded="true"] .flip{transform:rotateY(180deg)}
+  .side{backface-visibility:hidden; border-radius:8px; overflow:hidden;
+        background:var(--card); border:1px solid var(--line); display:flex; flex-direction:column}
+  /* หน้าที่โชว์อยู่เป็นตัวกำหนดความสูงการ์ด อีกหน้าลอยทับ —
+     ไม่งั้นต้องล็อกความสูงตายตัว แล้วตัวที่มีข้อจำกัดยาว ๆ จะโดนซ่อนไว้ในสกรอลล์ครึ่งใบ */
+  .front{position:relative}
+  .back{position:absolute; inset:0}
+  .agc[aria-expanded="true"] .front{position:absolute; inset:0}
+  .agc[aria-expanded="true"] .back{position:relative; inset:auto; min-height:100%}
+  .back{transform:rotateY(180deg); padding:9px 10px; gap:2px; font-size:.7rem; line-height:1.45}
+  /* รูปกินพื้นที่ 2 ใน 3 ของการ์ด — นี่คือเหตุผลที่รูปมีอยู่ ไม่ใช่ของประดับ */
+  .pic{width:100%; aspect-ratio:1; flex:none; object-fit:cover; background:var(--bg); display:block}
+  .pic.letter{display:flex; align-items:center; justify-content:center;
+              font-family:var(--mono); font-size:2rem; color:var(--line)}
+  .meta{padding:7px 9px 8px; display:flex; flex-direction:column; gap:1px; min-width:0}
+  .meta .n{font-size:.92rem; line-height:1.25}
+  .meta .w{font-size:.68rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .meta .s{font-size:.68rem; color:var(--muted); font-family:var(--mono); margin-top:2px}
+  /* แถบสถานะอยู่ใต้รูปพอดี — เห็นจากหางตาโดยไม่ต้องอ่าน */
+  .front{border-top:3px solid var(--line)}
+  .agc.run .front{border-top-color:var(--accent)}
+  .agc.ok   .front{border-top-color:var(--safe)}
+  .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
+  .agc.off .pic{filter:grayscale(.55); opacity:.7}
+  .agc.run .meta .s{color:var(--accent)}
+  .agc.bad .meta .s{color:var(--crit)}
+  .back .bn{font-size:.78rem; line-height:1.2}
+  .back .bl{color:var(--muted)}
+  .back a{margin-top:3px}
+  .cant{margin-top:4px; border-left:2px solid var(--warn); padding-left:7px}
+  .cant > b{display:block; margin-bottom:2px}
+  .cant i{display:block; font-style:normal; color:var(--muted); margin-bottom:2px}
+  .cant i::before{content:'· '}
+  .scripts{font-size:.72rem; color:var(--muted); margin:-8px 0 16px}
+  .scripts .x{color:var(--crit)}
+  @media (prefers-reduced-motion: reduce){ .flip{transition:none} }
   .hidden{display:none}
   footer{margin-top:18px; font-size:.8rem; color:var(--muted)}
 
@@ -1139,43 +1157,55 @@ function agentCard(a, run) {
   const live = run && (run.status === 'in_progress' || run.status === 'queued');
   const failed = run && run.conclusion === 'failure';
 
-  let cls = 'ag off';
-  if (live) cls = 'ag run';
-  else if (failed) cls = 'ag bad';
-  else if (run) cls = 'ag ok';
+  let cls = 'agc off';
+  if (live) cls = 'agc run';
+  else if (failed) cls = 'agc bad';
+  else if (run) cls = 'agc ok';
 
   const state = !run ? 'ยังไม่เคยรัน'
     : live ? `▶ ${fmtDur(started, null)}`
-    : failed ? 'ล้ม'
-    : fmtDur(started, run.updated_at);
+    : failed ? `ล้ม · ${fmtAgo(started)}`
+    : `${fmtDur(started, run.updated_at)} · ${fmtAgo(started)}`;
 
-  // สคริปต์ไม่มีหน้า — มันคำนวณ ไม่ได้ตัดสินอะไร ผลออกมาเหมือนเดิมทุกครั้ง
-  const face = a.kind !== 'agent'
-    ? '<span class="noface">▪</span>'
-    : a.portrait
-      ? `<img class="face" src="portraits/${esc(a.portrait)}" alt=""
-           onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'face letter',textContent:${esc(JSON.stringify((a.name ?? '?')[0]))}}))">`
-      : `<span class="face letter">${esc((a.name ?? '?')[0])}</span>`;
-
-  const title = a.kind === 'agent' ? esc(a.name ?? '') : esc(a.workflow);
-  const sub = a.kind === 'agent' ? esc(a.workflow) : 'สคริปต์';
+  // ไม่มีไฟล์รูปก็ไม่พัง — ขึ้นตัวอักษรแรกของชื่อแทน
+  const pic = a.portrait
+    ? `<img class="pic" src="portraits/${esc(a.portrait)}" alt=""
+         onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'pic letter',textContent:${esc(JSON.stringify((a.name ?? '?')[0]))}}))">`
+    : `<span class="pic letter">${esc((a.name ?? '?')[0])}</span>`;
 
   // ข้อจำกัดอยู่บนการ์ดเดียวกับชื่อ ไม่ใช่ในเอกสารที่ไม่มีใครเปิด
   // การให้ชื่อและหน้ากับ agent ทำให้เชื่อมันง่ายขึ้นโดยอัตโนมัติ นี่คือของถ่วง
-  const detail = [
-    a.trigger ? `<div class="muted">ตื่นเมื่อ ${mdLite(a.trigger)}</div>` : '',
-    a.model ? `<div class="muted">${esc(a.model)}</div>` : '',
+  const back = [
+    `<span class="bn">${esc(a.name ?? '')}</span>`,
+    a.model ? `<span class="bl">${esc(a.model)}</span>` : '',
+    a.trigger ? `<span class="bl">ตื่นเมื่อ ${mdLite(a.trigger)}</span>` : '',
     a.cannot?.length
-      ? `<div class="cant"><b>ทำไม่ได้</b><ul>${a.cannot.map((c) => `<li>${mdLite(c)}</li>`).join('')}</ul></div>`
+      ? `<span class="cant"><b>ทำไม่ได้</b>${a.cannot.map((c) => `<i>${mdLite(c)}</i>`).join('')}</span>`
       : '',
-    run ? `<div class="muted"><a href="${esc(run.html_url ?? '')}" target="_blank" rel="noopener">ดู log รอบล่าสุด</a></div>` : '',
+    run ? `<a href="${esc(run.html_url ?? '')}" target="_blank" rel="noopener">ดู log รอบล่าสุด</a>` : '',
   ].join('');
 
-  return `<details class="${cls}">
-      <summary>${face}<span class="txt"><span class="n">${title}</span><span class="w">${sub}</span>
-        <span class="s">${esc(state)}${run && !live ? ` · ${fmtAgo(started)}` : ''}</span></span></summary>
-      <div class="det">${detail}</div>
-    </details>`;
+  return `<div class="${cls}" role="button" tabindex="0" aria-expanded="false">
+      <span class="flip">
+        <span class="side front">${pic}<span class="meta">
+          <span class="n">${esc(a.name ?? '')}</span>
+          <span class="w">${esc(a.workflow)}</span>
+          <span class="s">${esc(state)}</span></span></span>
+        <span class="side back">${back}</span>
+      </span>
+    </div>`;
+}
+
+/** ผูกการพลิกหลังวาดเสร็จ — ลิงก์ไป log ต้องกดได้โดยการ์ดไม่พลิก */
+function wireFlips(root) {
+  for (const c of root.querySelectorAll('.agc')) {
+    const turn = () => c.setAttribute('aria-expanded',
+      c.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+    c.onclick = (e) => { if (!e.target.closest('a')) turn(); };
+    c.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); }
+    };
+  }
 }
 
 function renderAgents({ registry, regError, results, foreign }) {
@@ -1257,11 +1287,21 @@ function renderAgents({ registry, regError, results, foreign }) {
     })
     .sort((a, b) => (b.live - a.live) || (b.bad - a.bad));
 
+  // สคริปต์ไม่ได้ขึ้นเป็นการ์ด — มันคำนวณ ไม่ได้ตัดสินอะไร ผลออกมาเหมือนเดิมทุกครั้ง
+  // แต่**ยังต้องเห็นตอนมันล้ม** ไม่งั้นวันที่ checks แดงจะไม่มีอะไรบอกเลย
   const section = (s) => {
     const note = s.live ? `รัน ${s.live}` : s.bad ? `ล้ม ${s.bad}` : 'ว่าง';
+    const cards = s.list.filter((o) => o.a.kind === 'agent');
+    const scripts = s.list.filter((o) => o.a.kind !== 'agent');
+    const down = scripts.filter((o) => o.run?.conclusion === 'failure');
+    const tail = scripts.length
+      ? `<div class="scripts">สคริปต์ ${scripts.length} ตัว${down.length
+          ? ` — <span class="x">ล้ม: ${down.map((o) => esc(o.a.workflow)).join(' · ')}</span>`
+          : ' — ปกติ'}</div>`
+      : '';
     return `<div class="rule">${esc(s.repo.split('/')[1])}
         <span class="muted">${note} · ${s.runs} รอบใน 7 วัน</span></div>
-      <div class="aggrid">${s.list.map((o) => agentCard(o.a, o.run)).join('')}</div>`;
+      <div class="agdeck">${cards.map((o) => agentCard(o.a, o.run)).join('')}</div>${tail}`;
   };
 
   // ตัวเลขที่นี่คือข้อเท็จจริงว่าเครื่องทำอะไรไป **ไม่ใช่คะแนนของเจ้าของ**
@@ -1276,9 +1316,10 @@ function renderAgents({ registry, regError, results, foreign }) {
       <div><b>${failed.length}</b>ล้ม</div>
     </div>
     ${repos.map(section).join('')}
-    <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
+    <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อพลิกดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
     <div class="row"><button id="reloadAgents">โหลดใหม่</button></div>`;
 
+  wireFlips($('agents'));
   const btn = $('reloadAgents');
   if (btn) btn.onclick = loadAgents;
 }
