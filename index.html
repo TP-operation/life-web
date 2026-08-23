@@ -55,12 +55,112 @@
   .stale{border-color:var(--warn); background:var(--warn-bg)}
   .hidden{display:none}
   footer{margin-top:18px; font-size:.8rem; color:var(--muted)}
+
+  /* ── ชั้นหน้าตาแบบแผงควบคุม ──────────────────────────────
+     เพิ่มทับของเดิม ไม่ได้แทนที่ — ทุกอย่างข้างบนยังทำงานเหมือนเดิม
+     ถ้าวันไหนอยากถอดทิ้ง ลบตั้งแต่บรรทัดนี้ลงไปแล้วหน้าจะกลับเป็นแบบเดิม
+
+     ห้ามใช้ web font — คอมที่ทำงานอาจบล็อก Google Fonts แล้วหน้าจะเพี้ยนเงียบ ๆ
+     ตัวเลขทั้งหมดใช้ฟอนต์ที่มากับเครื่องและบังคับความกว้างเท่ากันด้วย tabular-nums
+     ไม่งั้นเลขจะขยับซ้ายขวาทุกวินาทีตอนจับเวลา */
+  :root{ --mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace }
+
+  .mono, .cap b, #timerDisplay, .badge{
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* แถบบน — ติดขอบไว้เพื่อให้รู้เสมอว่าดูอะไรอยู่ ตอนเลื่อนยาว ๆ */
+  header.top{
+    position:sticky; top:0; z-index:5;
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    margin:-16px -16px 0; padding:12px 16px;
+    background:var(--card); border-bottom:1px solid var(--line);
+  }
+  header.top .brand{
+    font-family:var(--mono); font-weight:700; letter-spacing:.14em; font-size:.82rem;
+  }
+  header.top .brand .dot{
+    display:inline-block; width:7px; height:7px; border-radius:50%;
+    background:var(--muted); margin-right:8px; vertical-align:middle;
+  }
+  header.top.live .brand .dot{ background:var(--safe) }
+  header.top .meta{ font-size:.78rem; color:var(--muted); font-family:var(--mono) }
+
+  /* แท็บ — เลื่อนแนวนอนได้บนจอแคบ ไม่ตัดตัวไหนหาย */
+  /* --head-h วัดจากของจริงด้วย JS ไม่ตรึงค่าไว้ — ความสูงของแถบบนขึ้นกับฟอนต์ไทย
+     ที่แต่ละเครื่องมีไม่เหมือนกัน (คอมที่ทำงาน · Android · iPhone) ตัวเลขตายตัว
+     จะเหลื่อมกันคนละนิดบนทุกเครื่องโดยที่ไม่มีใครสังเกต */
+  nav.tabs{
+    position:sticky; top:var(--head-h,46px); z-index:4;
+    display:flex; gap:2px; overflow-x:auto;
+    margin:0 -16px 14px; padding:0 16px;
+    background:var(--bg); border-bottom:1px solid var(--line);
+  }
+  nav.tabs button{
+    flex:0 0 auto; min-height:0; padding:10px 14px;
+    border:0; border-bottom:2px solid transparent; border-radius:0;
+    background:none; color:var(--muted); font-size:.9rem; font-weight:600;
+  }
+  nav.tabs button.on{ color:var(--fg); border-bottom-color:var(--accent) }
+  nav.tabs button .n{
+    font-family:var(--mono); font-size:.72rem; color:var(--muted);
+    margin-left:6px; vertical-align:.05em;
+  }
+
+  /* หัวข้อคั่นแบบเส้น — เลขท้ายบรรทัดบอกจำนวนโดยไม่ต้องมีหัวข้อซ้อนหัวข้อ */
+  .rule{
+    display:flex; align-items:center; gap:10px;
+    margin:18px 0 8px; font-size:.78rem; letter-spacing:.1em;
+    text-transform:uppercase; color:var(--muted); font-family:var(--mono);
+  }
+  .rule::after{ content:""; flex:1; height:1px; background:var(--line) }
+
+  /* มาตรวัด capacity — แบ่งเป็นช่องแทนแท่งเรียบ ให้อ่านเป็นหน่วยได้ด้วยตา */
+  .cap div{ position:relative; padding-bottom:14px }
+  .cap .meter{
+    position:absolute; left:10px; right:10px; bottom:8px; height:5px;
+    background:var(--line); border-radius:2px; overflow:hidden; display:block;
+  }
+  .cap .meter::before{
+    content:""; position:absolute; inset:0 auto 0 0; width:var(--p,0%);
+    background:var(--accent);
+    -webkit-mask-image:repeating-linear-gradient(90deg,#000 0 4px,transparent 4px 6px);
+    mask-image:repeating-linear-gradient(90deg,#000 0 4px,transparent 4px 6px);
+  }
+
+  /* จุดสถานะหน้ารายการ — แทนการใช้สีพื้นทั้งแถบซึ่งกินสายตาเมื่อมีหลายอัน */
+  .task{ position:relative }
+  .task h3::before{
+    content:"● "; color:var(--muted); font-size:.8em; vertical-align:.12em;
+  }
+  .task.safe h3::before{ color:var(--safe) }
+  .task.warning h3::before{ color:var(--warn) }
+  .task.critical h3::before,
+  .task.overdue h3::before,
+  .task.impossible h3::before{ color:var(--crit) }
+
+  /* แผงของแต่ละแท็บ — JS เป็นคนสั่งซ่อน/แสดงตาม id ของ section */
+  .panel-empty{
+    color:var(--muted); font-size:.9rem; text-align:center;
+    padding:28px 12px; border:1px dashed var(--line); border-radius:12px;
+  }
 </style>
 </head>
 <body>
 
-<h1>แผนวันนี้</h1>
-<p class="muted" id="sub">ยังไม่ได้เชื่อมต่อ</p>
+<header class="top" id="top">
+  <div class="brand"><span class="dot"></span>LIFE</div>
+  <div class="meta" id="sub">ยังไม่ได้เชื่อมต่อ</div>
+</header>
+
+<!-- แท็บโผล่หลังเชื่อมต่อแล้วเท่านั้น — ก่อนหน้านั้นมีแค่ช่องกรอกโทเคนให้ทำ -->
+<nav class="tabs hidden" id="tabs">
+  <button data-tab="today" class="on">วันนี้</button>
+  <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
+  <button data-tab="log">บันทึก</button>
+  <button data-tab="do">สั่งงาน</button>
+</nav>
 
 <!-- ตั้งค่า token — ไม่มี token ฝังในหน้านี้ ผู้ใช้กรอกเองเสมอ (INVARIANTS §5.2) -->
 <section class="card" id="setup">
@@ -331,16 +431,17 @@ function renderProjects(d) {
     ? `<span class="muted">${needsDecision} อันรอให้ตัดสินใจ · เดินอยู่ ${c.running ?? 0} · พัก ${c.resting ?? 0}</span>`
     : `<span class="muted">เดินอยู่ ${c.running ?? 0} · นิ่ง ${c.stale ?? 0} · พัก ${c.resting ?? 0}</span>`;
 
+  // ตัวเลขบนแท็บ — บอกจำนวนที่รอตัดสินใจ ไม่ใช่จำนวนโปรเจคทั้งหมด
+  // เลขรวมไม่ได้บอกอะไรเพราะมันแทบไม่เปลี่ยน ส่วนเลขที่ต้องตัดสินใจคือเลขที่ควรทำให้เหลือศูนย์
+  const n = $('tabProjectsN');
+  if (n) n.textContent = needsDecision ? String(needsDecision) : '';
+
   $('projects').innerHTML = `
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <strong>โปรเจค</strong>
-        ${head}
-      </div>
-      ${staleBar}
-      <div style="margin-top:10px">${list.map(row).join('')}</div>
-      <p class="muted">แก้ทะเบียนได้ที่ <code>60-projects/</code> ใน Obsidian ที่บ้าน</p>
-    </div>`;
+    <div class="rule">โปรเจค ${list.length}</div>
+    <div style="margin:-2px 0 10px">${head}</div>
+    ${staleBar}
+    ${list.map(row).join('')}
+    <p class="muted" style="margin-top:12px">แก้ทะเบียนได้ที่ <code>60-projects/</code> ใน Obsidian ที่บ้าน</p>`;
 }
 
 function renderWeek(w) {
@@ -454,17 +555,26 @@ function render(d) {
   }
 
   const c = d.capacityToday;
-  $('cap').innerHTML = [
-    ['งานโรงงาน', c.work], ['โปรเจค', c.project], ['ชีวิต', c.life],
-  ].map(([k, v]) => `<div><span class="muted">${k}</span><b>${v} ชม.</b></div>`).join('');
+  const caps = [['งานโรงงาน', c.work], ['โปรเจค', c.project], ['ชีวิต', c.life]];
+  // มาตรวัดเทียบกันเองภายในวัน ไม่ได้เทียบกับเป้า — วันหยุดกับวันทำงานมีเพดานคนละแบบ
+  // การตรึงสเกลไว้ที่ค่าคงที่จะทำให้วันหยุดดูเหมือนวันที่ว่างน้อย
+  const capMax = Math.max(...caps.map(([, v]) => v), 1);
+  $('cap').innerHTML = caps.map(([k, v]) =>
+    `<div><span class="muted">${k}</span><b>${v} ชม.</b>
+      <i class="meter" style="--p:${Math.round((v / capMax) * 100)}%"></i></div>`).join('');
+
+  // เชื่อมต่อได้แล้ว — จุดบนหัวเปลี่ยนเป็นเขียวและแท็บโผล่
+  $('top').classList.add('live');
+  $('tabs').classList.remove('hidden');
+  showTab(currentTab());
   paintOtCards();
 
   const TH = { work: 'งานโรงงาน', project: 'โปรเจค', life: 'ชีวิต' };
   const ST = { safe: 'พอไหว', warning: 'เริ่มตึง', critical: 'ต้องลงมือแล้ว', overdue: 'เลยกำหนด', impossible: 'ไม่มีเวลาเหลือ' };
 
   $('tasks').innerHTML = d.tasks.length === 0
-    ? '<div class="card">ไม่มีงานค้าง</div>'
-    : d.tasks.map((t) => `
+    ? '<div class="rule">งานค้าง</div><div class="panel-empty">ไม่มีงานค้าง</div>'
+    : `<div class="rule">งานค้าง ${d.tasks.length}</div>` + d.tasks.map((t) => `
       <div class="task ${t.status}">
         <h3>${t.title}</h3>
         <div>
@@ -878,6 +988,51 @@ $('timerSave').onclick = async () => {
 };
 
 paintTimer();
+
+// ── แท็บ ───────────────────────────────────────────────────
+// แบ่งการ์ด 11 ใบเป็น 4 กลุ่มตาม "ตอนนี้จะทำอะไร" ไม่ใช่ตามชนิดของข้อมูล
+//
+// ไม่ย้าย markup เลยแม้แต่บรรทัดเดียว — JS สั่งซ่อน/แสดงตาม id
+// เหตุผล: การ์ดหลายใบมีคลาส `hidden` ที่ตรรกะเดิมเปิดปิดอยู่ ถ้าย้าย DOM
+// ไปซ้อนใน wrapper แล้วเผลอไปยุ่งกับคลาสนั้น ปุ่มที่เคยทำงานจะเงียบไปโดยไม่มีใครรู้
+//
+// วิธีนี้ประกอบกับของเดิมได้พอดี: แท็บที่ไม่ได้เลือกตั้ง display:none ตรง ๆ
+// ส่วนแท็บที่เลือกตั้งเป็นค่าว่าง แล้วปล่อยให้คลาส `hidden` เดิมตัดสินต่อ
+const TABS = {
+  today:    ['plan', 'tasks', 'drafts'],
+  projects: ['projects'],
+  log:      ['otBox', 'timerBox', 'week'],
+  do:       ['askBox', 'newTaskBox', 'dispatchBox', 'inboxBox'],
+};
+const TAB_KEY = 'life_tab';
+
+const currentTab = () => (TABS[localStorage.getItem(TAB_KEY)] ? localStorage.getItem(TAB_KEY) : 'today');
+
+function showTab(name) {
+  const tab = TABS[name] ? name : 'today';
+  for (const [key, ids] of Object.entries(TABS)) {
+    for (const id of ids) {
+      const el = $(id);
+      if (el) el.style.display = key === tab ? '' : 'none';
+    }
+  }
+  for (const b of document.querySelectorAll('nav.tabs button')) {
+    b.classList.toggle('on', b.dataset.tab === tab);
+  }
+  localStorage.setItem(TAB_KEY, tab);
+}
+
+for (const b of document.querySelectorAll('nav.tabs button')) {
+  b.onclick = () => { showTab(b.dataset.tab); window.scrollTo({ top: 0 }); };
+}
+
+// แท็บต้องเกาะใต้แถบบนพอดี — วัดความสูงจริงแทนการตรึงตัวเลขไว้ใน CSS
+function syncHeadHeight() {
+  const h = $('top')?.offsetHeight;
+  if (h) document.documentElement.style.setProperty('--head-h', `${h}px`);
+}
+syncHeadHeight();
+addEventListener('resize', syncHeadHeight);
 
 // ── สั่งงานโปรเจค ──────────────────────────────────────────
 // ทางเดียวกับกล่อง inbox เป๊ะ ๆ คือเปิด issue แล้วให้ workflow ทำต่อ
