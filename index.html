@@ -82,15 +82,24 @@
   .meta{padding:7px 9px 8px; display:flex; flex-direction:column; gap:1px; min-width:0}
   .meta .n{font-size:.92rem; line-height:1.25}
   .meta .w{font-size:.68rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .meta .s{font-size:.68rem; color:var(--muted); font-family:var(--mono); margin-top:2px}
+  .meta .s{font-size:.68rem; color:var(--muted); font-family:var(--mono); margin-top:2px;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   /* แถบสถานะอยู่ใต้รูปพอดี — เห็นจากหางตาโดยไม่ต้องอ่าน */
-  .front{border-top:3px solid var(--line)}
+  .front{border-top:5px solid var(--line)}
   .agc.run .front{border-top-color:var(--accent)}
   .agc.ok   .front{border-top-color:var(--safe)}
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
-  .agc.off .pic{filter:grayscale(.55); opacity:.7}
-  .agc.run .meta .s{color:var(--accent)}
-  .agc.bad .meta .s{color:var(--crit)}
+  /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
+     ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  .agc .pic{filter:grayscale(1); opacity:.68; transition:filter .2s, opacity .2s}
+  .agc.run .pic{filter:none; opacity:1}
+  /* สถานะบอกด้วยสามอย่างพร้อมกัน — สัญลักษณ์ สี และคำ
+     สีอย่างเดียวไม่พอ: เขียวกับเทาบนพื้นอ่อนแยกยากตอนกวาดตา และคนตาบอดสีแยกไม่ออกเลย
+     เวลาที่ต่อท้ายยังเป็นสีจาง ไม่งั้นทั้งการ์ดจะกลายเป็นสีเดียวกันหมด */
+  .meta .s b{font-weight:600}
+  .agc.run .meta .s b{color:var(--accent)}
+  .agc.ok  .meta .s b{color:var(--safe)}
+  .agc.bad .meta .s b{color:var(--crit)}
   .back .bn{font-size:.78rem; line-height:1.2}
   .back .bl{color:var(--muted)}
   .back a{margin-top:3px}
@@ -103,7 +112,7 @@
   .legend{display:flex; flex-wrap:wrap; gap:5px 16px; font-size:.7rem;
           color:var(--muted); margin:-4px 0 14px}
   .legend span{display:flex; align-items:center; gap:6px}
-  .legend i{width:16px; height:3px; border-radius:2px; background:var(--line); flex:none}
+  .legend i{width:18px; height:5px; border-radius:2px; background:var(--line); flex:none}
   .legend i.run{background:var(--accent)}
   .legend i.ok{background:var(--safe)}
   .legend i.bad{background:var(--crit)}
@@ -1201,10 +1210,11 @@ function agentCard(a, run, key, flipped) {
   else if (failed) cls = 'agc bad';
   else if (run) cls = 'agc ok';
 
-  const state = !run ? 'ยังไม่เคยรัน'
-    : live ? `▶ ${fmtDur(started, null)}`
-    : failed ? `ล้ม · ${fmtAgo(started)}`
-    : `${fmtDur(started, run.updated_at)} · ${fmtAgo(started)}`;
+  // [สัญลักษณ์+คำ, รายละเอียดที่ต่อท้าย] — ส่วนแรกมีสี ส่วนหลังจาง
+  const [word, detail] = !run ? ['— ยังไม่เคยรัน', '']
+    : live ? ['▶ กำลังรัน', fmtDur(started, null)]
+    : failed ? ['✗ ล้ม', fmtAgo(started)]
+    : ['✓ ผ่าน', fmtAgo(started)];   // ไม่เอาเวลาที่ใช้รันมาต่อ — สามท่อนบนการ์ดกว้าง 158px ตกบรรทัด
 
   // ไม่มีไฟล์รูปก็ไม่พัง — ขึ้นตัวอักษรแรกของชื่อแทน
   const pic = a.portrait
@@ -1229,7 +1239,7 @@ function agentCard(a, run, key, flipped) {
         <span class="side front">${pic}<span class="meta">
           <span class="n">${esc(a.name ?? '')}</span>
           <span class="w">${esc(a.workflow)}</span>
-          <span class="s">${esc(state)}</span></span></span>
+          <span class="s"><b>${esc(word)}</b>${detail ? ` · ${esc(detail)}` : ''}</span></span></span>
         <span class="side back">${back}</span>
       </span>
     </div>`;
@@ -1374,10 +1384,10 @@ function renderAgents({ registry, regError, results }) {
       <div><b>${failed.length}</b>ล้ม</div>
     </div>
     <div class="legend">
-      <span><i class="run"></i>กำลังรันอยู่</span>
-      <span><i class="ok"></i>รอบล่าสุดผ่าน</span>
-      <span><i class="bad"></i>รอบล่าสุดล้ม</span>
-      <span><i class="off"></i>ยังไม่มีรอบใน 7 วัน · รูปเป็นขาวดำ</span>
+      <span><i class="run"></i>▶ กำลังรัน · รูปมีสีเฉพาะตัวนี้</span>
+      <span><i class="ok"></i>✓ รอบล่าสุดผ่าน</span>
+      <span><i class="bad"></i>✗ รอบล่าสุดล้ม</span>
+      <span><i class="off"></i>— ยังไม่เคยรัน</span>
     </div>
     ${repos.map(section).join('')}
     <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อพลิกดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
