@@ -1,55 +1,123 @@
 name: ด่านกัน agent ยกระดับสิทธิ์ตัวเอง
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [main]
-
 # ═══════════════════════════════════════════════════════════════
 # ภัยที่กันอยู่: Mason มี Write กับ Edit และ `contents: write`
 # PR ที่แก้ไฟล์ใน .github/ จึงเปลี่ยนสิทธิ์ของ workflow ปิดด่าน
-# หรือทำให้ secret หลุดในรอบถัดไปได้ — ทั้งหมดนี้ในรอบเดียวกับที่ดูเหมือนงานปกติ
+# หรือทำให้ secret หลุดในรอบถัดไปได้ ในรอบเดียวกับที่ดูเหมือนงานปกติ
 #
-# ⚠️ repo นี้เป็น **public** และหน้าเว็บถือ PAT อยู่ในเบราว์เซอร์
-#    ข้อ 2 (โทเคนหลุด) จึงร้ายแรงกว่าที่ ebr มาก — ประวัติ git ลบไม่ได้
+# ⚠️ **ทำไมถึงเป็น pull_request_target ไม่ใช่ pull_request**
+#    `pull_request` ใช้ไฟล์ workflow **เวอร์ชันที่อยู่ใน PR นั้นเอง** —
+#    PR ที่ลบไฟล์นี้ทิ้งจะทำให้ด่านไม่รัน แล้วผ่านไปเงียบ ๆ
+#    `pull_request_target` ใช้เวอร์ชันบน `main` เสมอ ด่านจึงลบไม่ได้จาก PR
 #
-# ⚠️ workflow ที่รันตอน pull_request คือ **เวอร์ชันที่อยู่ใน PR นั้นเอง**
-#    แปลว่า PR ที่ลบไฟล์นี้ทิ้งจะทำให้ job นี้ไม่รัน
-#    ตัวที่กันจริงคือ branch protection ที่ตั้ง job นี้เป็น **required check** —
-#    ถ้า check ไม่รายงานผล ปุ่ม merge จะไม่เขียวตลอดกาล
-#    ไม่ได้ตั้ง = ไฟล์นี้เป็นแค่ไฟแดงที่ merge ข้ามได้
+#    ปกติวิธีปิดรูนี้คือตั้ง required check ใน branch protection
+#    แต่ repo นี้เป็น private บนแพ็กเกจฟรี — GitHub ตอบ 403 ทั้ง protection และ ruleset
+#    (ยืนยันด้วยการยิง API จริง 24 ส.ค. 2026) จึงต้องปิดรูที่ตัว trigger แทน
 #
-# ลอกแบบมาจาก nse-manufac/plan แล้วปรับตามสิ่งที่ repo นี้หวง
+# 🛑 **ห้ามรันโค้ดจาก PR ในไฟล์นี้เด็ดขาด** — ห้าม npm install ห้าม npm test
+#    ห้าม node ห้ามเรียกสคริปต์ใด ๆ ที่มาจาก PR
+#    `pull_request_target` ให้โทเคนที่เขียนได้และเห็น secret ของ repo
+#    ถ้าเผลอรันของจาก PR = ยกกุญแจให้เนื้อหาที่ยังไม่ได้ตรวจ
+#    ไฟล์นี้ใช้แค่ git กับ grep เท่านั้น และต้องเป็นแบบนั้นตลอดไป
+#
+# ทาง 2 — workflow_run หลัง `ลงมือแก้` จบ เผื่อวันที่ Mason เปิด PR เองได้
+#    PR ที่ bot เปิดด้วย GITHUB_TOKEN จะไม่สร้าง workflow run ใหม่ (กฎกันลูปของ GitHub)
+#    ทาง 1 จึงไม่ตื่น · `workflow_run` ก็ใช้ไฟล์เวอร์ชันบน `main` เหมือนกัน
+#    ทางนี้ไม่ขึ้นเป็น check บน PR จึงต้องคอมเมนต์บอกแทน
 # ═══════════════════════════════════════════════════════════════
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  workflow_run:
+    workflows: ["ลงมือแก้"]
+    types: [completed]
 
 permissions:
   contents: read
+  pull-requests: write
+
+concurrency:
+  group: agent-guard-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
 
 jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.r.outputs.pr }}
+      head_ref: ${{ steps.r.outputs.head_ref }}
+      found: ${{ steps.r.outputs.found }}
+      via: ${{ steps.r.outputs.via }}
+    steps:
+      - name: หาว่าจะตรวจ PR ไหน
+        id: r
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          PR_REF: ${{ github.event.pull_request.head.ref }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request_target" ]; then
+            echo "pr=$PR_NUM"        >> "$GITHUB_OUTPUT"
+            echo "head_ref=$PR_REF"  >> "$GITHUB_OUTPUT"
+            echo "found=1"           >> "$GITHUB_OUTPUT"
+            echo "via=check"         >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ทาง workflow_run — หา PR ที่เปิดอยู่ของ branch นั้น
+          n=$(gh pr list --repo "$REPO" --head "$RUN_BRANCH" --state open                 --json number --jq '.[0].number // empty')
+          if [ -z "$n" ]; then
+            echo "ยังไม่มี PR ที่เปิดอยู่ของ branch $RUN_BRANCH — ไม่มีอะไรให้ตรวจ"
+            echo "found=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr=$n"                   >> "$GITHUB_OUTPUT"
+          echo "head_ref=$RUN_BRANCH"    >> "$GITHUB_OUTPUT"
+          echo "found=1"                 >> "$GITHUB_OUTPUT"
+          echo "via=comment"             >> "$GITHUB_OUTPUT"
+
   guard:
+    needs: pick
+    if: needs.pick.outputs.found == '1'
     name: ตรวจสิ่งที่ agent ห้ามแตะ
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
+      # เอา main มา ไม่ใช่เนื้อของ PR — ของใน PR ยังไม่ผ่านการตรวจ
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: ตรวจไฟล์ที่เปลี่ยน
+        id: check
         env:
-          HEAD_REF: ${{ github.head_ref }}
-          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ needs.pick.outputs.head_ref }}
+          BASE_REF: main
+          PR: ${{ needs.pick.outputs.pr }}
         run: |
           set -euo pipefail
+          git fetch --quiet origin "$BASE_REF"
+          # refs/pull/N/head ใช้ได้ทั้ง PR จาก branch ในนี้และจาก fork
+          git fetch --quiet origin "refs/pull/$PR/head"
+          PRHEAD=$(git rev-parse FETCH_HEAD)
+          export PRHEAD
           git fetch --quiet origin "$BASE_REF"
           BASE="origin/$BASE_REF"
 
           # quotepath=false ไม่งั้นชื่อไฟล์ภาษาไทยถูกแปลงเป็นเลขฐานแปดแล้วเทียบไม่ตรง
-          CHANGED=$(git -c core.quotepath=false diff --name-only "$BASE...HEAD")
+          CHANGED=$(git -c core.quotepath=false diff --name-only "$BASE...$PRHEAD")
           # ไฟล์ที่ยังอยู่จริงใน PR — ไม่รวมของที่ถูกลบ ไม่งั้น PR ที่ "เก็บกวาด"
           # ไฟล์ชั่วคราวเก่าออกจะโดนข้อ 5 ตีตกทั้งที่กำลังทำสิ่งที่ถูก
-          LIVING=$(git -c core.quotepath=false diff --name-only --diff-filter=d "$BASE...HEAD")
+          LIVING=$(git -c core.quotepath=false diff --name-only --diff-filter=d "$BASE...$PRHEAD")
 
           echo "branch: $HEAD_REF"
           echo "ไฟล์ที่เปลี่ยน:"
@@ -71,7 +139,7 @@ jobs:
           # ── 2. ห้ามมี secret หลุดเข้ามา ──
           # repo นี้ private แต่ประวัติ git ลบไม่ได้ และโทเคนที่หลุดก็คือโทเคนที่หลุด
           # ตรวจเฉพาะบรรทัดที่เพิ่มเข้ามา เพื่อไม่ให้ของเก่าทำ PR ใหม่แดง
-          ADDED=$(git diff "$BASE...HEAD" -- . ":(exclude)*.md" | grep "^+" || true)
+          ADDED=$(git diff "$BASE...$PRHEAD" -- . ":(exclude)*.md" | grep "^+" || true)
           leak() {
             if printf "%s" "$ADDED" | grep -qE "$1"; then
               echo "::error::พบ $2 ในบรรทัดที่เพิ่มเข้ามา"
@@ -87,7 +155,7 @@ jobs:
           # checks.mjs คือด่านเดียวที่จับ id ซ้ำ ตัวแปรซ้ำ และ fetch ออกนอก GitHub
           # PR ที่ลบมันทิ้งคือ PR ที่ปิดไฟเตือนแทนที่จะดับไฟ
           for must in checks.mjs checks.test.mjs; do
-            if git diff --name-status "$BASE...HEAD" | grep -qE "^D[[:space:]]+$must$"; then
+            if git diff --name-status "$BASE...$PRHEAD" | grep -qE "^D[[:space:]]+$must$"; then
               echo "::error::PR นี้ลบ $must ทิ้ง — นั่นคือการปิดด่าน ไม่ใช่การแก้งาน"
               FAIL=1
             fi
@@ -96,9 +164,9 @@ jobs:
           # ── 4. ห้ามลบไฟล์เทสทิ้ง ──
           # เทสแดงแปลว่าโค้ดผิด ไม่ใช่เทสผิด
           # เทสของ repo นี้อยู่ที่ราก ไม่ได้อยู่ใน tests/
-          if git diff --name-status "$BASE...HEAD" | grep -qE "^D[[:space:]]+.*\.test\.(mjs|cjs|js)$"; then
+          if git diff --name-status "$BASE...$PRHEAD" | grep -qE "^D[[:space:]]+.*\.test\.(mjs|cjs|js)$"; then
             echo "::error::PR นี้ลบไฟล์เทสทิ้ง — เทสแดงแปลว่าโค้ดผิด ไม่ใช่เทสผิด"
-            git diff --name-status "$BASE...HEAD" | grep -E "^D[[:space:]]+.*\.test\." | sed 's/^/::error::  /'
+            git diff --name-status "$BASE...$PRHEAD" | grep -E "^D[[:space:]]+.*\.test\." | sed 's/^/::error::  /'
             FAIL=1
           fi
 
@@ -115,3 +183,22 @@ jobs:
             exit 1
           fi
           echo "✓ ผ่าน — ไม่มีไฟล์ต้องห้ามถูกแตะ"
+
+      # ทาง workflow_run ไม่ขึ้นเป็น check บน PR ถ้าไม่คอมเมนต์ก็ไม่มีใครเห็นว่าแดง
+      - name: บอกที่ PR ถ้าไม่ผ่าน
+        if: failure() && needs.pick.outputs.via == 'comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ needs.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          # ⚠️ ห้ามเขียนข้อความหลายบรรทัดตรง ๆ ในนี้ — บรรทัดที่เริ่มคอลัมน์ 0
+          # จะจบ block scalar ของ YAML แล้วไฟล์พังทั้งไฟล์ (เคยพลาดมาแล้วสองครั้ง)
+          {
+            echo "🛑 **ด่านกัน agent ยกระดับสิทธิ์ตัวเอง ไม่ผ่าน**"
+            echo ""
+            echo "ดูรายละเอียด: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo ""
+            echo "อย่า merge จนกว่าจะแก้ — ด่านนี้ตรวจสิ่งที่ agent แตะไม่ได้ เช่นไฟล์ใน .github/ โทเคนที่หลุดเข้ามา และไฟล์เทสที่ถูกลบ"
+          } > "$RUNNER_TEMP/guard-fail.md"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/guard-fail.md"
