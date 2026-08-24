@@ -98,6 +98,15 @@
   .cant > b{display:block; margin-bottom:2px}
   .cant i{display:block; font-style:normal; color:var(--muted); margin-bottom:2px}
   .cant i::before{content:'· '}
+  /* คำอธิบายสี — แถบตัวอย่างต้องหน้าตาเหมือนแถบบนการ์ดจริง (สูง 3px เท่ากัน)
+     ไม่ใช่จุดกลม ไม่งั้นต้องแปลจากจุดเป็นแถบในหัวอีกชั้นหนึ่ง */
+  .legend{display:flex; flex-wrap:wrap; gap:5px 16px; font-size:.7rem;
+          color:var(--muted); margin:-4px 0 14px}
+  .legend span{display:flex; align-items:center; gap:6px}
+  .legend i{width:16px; height:3px; border-radius:2px; background:var(--line); flex:none}
+  .legend i.run{background:var(--accent)}
+  .legend i.ok{background:var(--safe)}
+  .legend i.bad{background:var(--crit)}
   .scripts{font-size:.72rem; color:var(--muted); margin:-8px 0 16px}
   .scripts .x{color:var(--crit)}
   @media (prefers-reduced-motion: reduce){ .flip{transition:none} }
@@ -1363,6 +1372,12 @@ function renderAgents({ registry, regError, results }) {
       <div><b>${week.length}</b>รอบใน 7 วัน</div>
       <div><b>${modelRuns.length}</b>เรียกโมเดล</div>
       <div><b>${failed.length}</b>ล้ม</div>
+    </div>
+    <div class="legend">
+      <span><i class="run"></i>กำลังรันอยู่</span>
+      <span><i class="ok"></i>รอบล่าสุดผ่าน</span>
+      <span><i class="bad"></i>รอบล่าสุดล้ม</span>
+      <span><i class="off"></i>ยังไม่มีรอบใน 7 วัน · รูปเป็นขาวดำ</span>
     </div>
     ${repos.map(section).join('')}
     <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อพลิกดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
