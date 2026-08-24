@@ -110,13 +110,23 @@ jobs:
           git checkout -b "$b"
           echo "name=$b" >> "$GITHUB_OUTPUT"
 
-      - uses: anthropics/claude-code-action@v1
+      # ⚠️ continue-on-error ไม่ใช่การกลบปัญหา — มันคือสิ่งที่ทำให้ **งานไม่หาย**
+      #
+      # 24 ส.ค. 2026 ที่ life-web #1: agent ทำงานเสร็จแล้วแต่ใช้ไป 36 เทิร์นจากเพดาน 35
+      # action จึงคืน failure แล้ว GitHub ข้ามทุก step ที่เหลือ — commit ก็ไม่ได้ทำ
+      # push ก็ไม่ได้ทำ **ของที่ทำเสร็จแล้วตายไปกับ runner ทั้งหมด**
+      #
+      # ตอนนี้ให้ step นี้ล้มได้โดยไม่ลาก step อื่นไปด้วย แล้วไปตัดสินตอนท้ายแทน
+      # ว่าจะแดงหรือไม่ · ถ้ามีของบนดิสก์ก็เปิด PR ให้ก่อน พร้อมติดป้ายเตือนไว้ในตัว PR
+      - id: claude
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: |
             --model claude-sonnet-5
-            --max-turns 35
+            --max-turns 70
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash(ls:*),Bash(cat:*),Bash(node checks.mjs),Bash(node --test:*),Bash(git diff:*),Bash(git status:*)"
           prompt: |
             แก้งานตาม issue นี้ในโปรเจกต์ life-web — หน้าเว็บของระบบผู้ช่วยส่วนตัว
@@ -222,6 +232,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GATE: ${{ steps.gate.outcome }}
+          CLAUDE: ${{ steps.claude.outcome }}
           ISSUE: ${{ needs.pick.outputs.number }}
           TITLE: ${{ needs.pick.outputs.title }}
           BRANCH: ${{ steps.br.outputs.name }}
@@ -246,6 +257,11 @@ jobs:
             echo "---"
             echo "ปิด #$ISSUE"
             echo
+            if [ "$CLAUDE" = "failure" ]; then
+              echo "> 🛑 **agent จบแบบไม่เรียบร้อย** (เช่นชนเพดานเทิร์น) — ของในนี้คืองานที่ทำไปแล้วก่อนหยุด"
+              echo "> อาจทำไม่ครบตาม issue · อ่านให้ละเอียดกว่าปกติก่อน merge"
+              echo
+            fi
             if [ "$GATE" = "success" ]; then
               echo "ด่านที่รันนอกมือ agent: **ผ่าน**"
             else
@@ -273,6 +289,15 @@ jobs:
             } > "$RUNNER_TEMP/pr-failed.md"
             gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/pr-failed.md"
           fi
+
+
+      # ต้องอยู่หลัง "เปิด PR" — งานถูกเก็บไว้แล้วค่อยรายงานว่ารอบนี้ไม่เรียบร้อย
+      # ไม่ใช่ตายก่อนแล้วค่อยเสียดาย
+      - name: รอบนี้ไม่เรียบร้อย ให้ run เป็นสีแดง
+        if: steps.claude.outcome == 'failure'
+        run: |
+          echo "::error::agent จบแบบไม่เรียบร้อย — ถ้ามี PR เปิดให้แล้ว ของยังอยู่ครบ แต่ต้องอ่านให้ละเอียดกว่าปกติ"
+          exit 1
 
       - name: แจ้งเมื่อล้ม
         if: failure()
