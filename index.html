@@ -1071,6 +1071,29 @@ const agentsState = { loading: false, loaded: false };
 
 const agentKey = (repo, workflow) => `${repo}::${workflow}`;
 
+// จำไว้ว่าการ์ดไหนพลิกอยู่ — คีย์คือ repo::workflow ไม่ใช่ลำดับการ์ด เพราะลำดับ
+// เปลี่ยนได้ทุกครั้งที่มีตัวไหนกำลังรัน (มันขึ้นบนสุดตาม section() ด้านล่าง)
+const AGENT_FLIPS_KEY = 'life_agent_flips';
+
+function loadAgentFlips() {
+  // `|| '{}'` กันแค่ค่าว่าง ไม่ได้กันค่าที่ parse ออกมาเป็น null — ผู้ตรวจจับได้ที่ PR #2
+  // ถ้าหลุดไป Object.keys(null) จะโยนกลางทาง renderAgents แล้วแท็บค้างที่ "กำลังถาม GitHub" ถาวร
+  try {
+    const v = JSON.parse(localStorage.getItem(AGENT_FLIPS_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
+}
+
+/** ตัดคีย์ที่ไม่มีอยู่ในทะเบียนแล้วออก ไม่งั้นค่าที่จำไว้จะค้างสะสมไปเรื่อย ๆ */
+function pruneAgentFlips(validKeys) {
+  const kept = {};
+  for (const k of Object.keys(loadAgentFlips())) {
+    if (validKeys.has(k)) kept[k] = true;
+  }
+  localStorage.setItem(AGENT_FLIPS_KEY, JSON.stringify(kept));
+  return kept;
+}
+
 /**
  * markdown เท่าที่ข้อความในทะเบียนใช้จริง — ตัวหนา โค้ด และ wikilink
  *
@@ -1159,7 +1182,7 @@ async function loadAgents() {
   renderAgents({ registry, regError, results });
 }
 
-function agentCard(a, run) {
+function agentCard(a, run, key, flipped) {
   const started = run ? (run.run_started_at ?? run.created_at) : null;
   const live = run && (run.status === 'in_progress' || run.status === 'queued');
   const failed = run && run.conclusion === 'failure';
@@ -1192,7 +1215,7 @@ function agentCard(a, run) {
     run ? `<a href="${esc(run.html_url ?? '')}" target="_blank" rel="noopener">ดู log รอบล่าสุด</a>` : '',
   ].join('');
 
-  return `<div class="${cls}" role="button" tabindex="0" aria-expanded="false">
+  return `<div class="${cls}" role="button" tabindex="0" aria-expanded="${flipped ? 'true' : 'false'}" data-key="${esc(key)}">
       <span class="flip">
         <span class="side front">${pic}<span class="meta">
           <span class="n">${esc(a.name ?? '')}</span>
@@ -1206,8 +1229,15 @@ function agentCard(a, run) {
 /** ผูกการพลิกหลังวาดเสร็จ — ลิงก์ไป log ต้องกดได้โดยการ์ดไม่พลิก */
 function wireFlips(root) {
   for (const c of root.querySelectorAll('.agc')) {
-    const turn = () => c.setAttribute('aria-expanded',
-      c.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+    const key = c.dataset.key;
+    const turn = () => {
+      const next = c.getAttribute('aria-expanded') === 'true' ? 'false' : 'true';
+      c.setAttribute('aria-expanded', next);
+      if (!key) return;
+      const flips = loadAgentFlips();
+      if (next === 'true') flips[key] = true; else delete flips[key];
+      localStorage.setItem(AGENT_FLIPS_KEY, JSON.stringify(flips));
+    };
     c.onclick = (e) => { if (!e.target.closest('a')) turn(); };
     c.onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); }
@@ -1226,9 +1256,14 @@ function renderAgents({ registry, regError, results }) {
   }
 
   const byKey = new Map();
+  const cardKeys = new Set();
   for (const a of registry.agents ?? []) {
-    for (const r of a.repos ?? []) byKey.set(agentKey(r, a.workflow), a);
+    for (const r of a.repos ?? []) {
+      byKey.set(agentKey(r, a.workflow), a);
+      if (a.kind === 'agent') cardKeys.add(agentKey(r, a.workflow));
+    }
   }
+  const flips = pruneAgentFlips(cardKeys);
 
   const allRuns = [];
   const broken = [];
@@ -1312,7 +1347,10 @@ function renderAgents({ registry, regError, results }) {
     const who = owner === AGENT_OWNER ? '' : `<span class="muted"> ${esc(owner)}</span>`;
     return `<div class="rule">${esc(short)}${who}
         <span class="muted">${note} · ${s.runs} รอบใน 7 วัน</span></div>
-      <div class="agdeck">${cards.map((o) => agentCard(o.a, o.run)).join('')}</div>${tail}`;
+      <div class="agdeck">${cards.map((o) => {
+        const k = agentKey(s.repo, o.a.workflow);
+        return agentCard(o.a, o.run, k, flips[k]);
+      }).join('')}</div>${tail}`;
   };
 
   // ตัวเลขที่นี่คือข้อเท็จจริงว่าเครื่องทำอะไรไป **ไม่ใช่คะแนนของเจ้าของ**
