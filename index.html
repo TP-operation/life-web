@@ -1076,7 +1076,12 @@ const agentKey = (repo, workflow) => `${repo}::${workflow}`;
 const AGENT_FLIPS_KEY = 'life_agent_flips';
 
 function loadAgentFlips() {
-  try { return JSON.parse(localStorage.getItem(AGENT_FLIPS_KEY) || '{}'); } catch { return {}; }
+  // `|| '{}'` กันแค่ค่าว่าง ไม่ได้กันค่าที่ parse ออกมาเป็น null — ผู้ตรวจจับได้ที่ PR #2
+  // ถ้าหลุดไป Object.keys(null) จะโยนกลางทาง renderAgents แล้วแท็บค้างที่ "กำลังถาม GitHub" ถาวร
+  try {
+    const v = JSON.parse(localStorage.getItem(AGENT_FLIPS_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
 }
 
 /** ตัดคีย์ที่ไม่มีอยู่ในทะเบียนแล้วออก ไม่งั้นค่าที่จำไว้จะค้างสะสมไปเรื่อย ๆ */
