@@ -1,0 +1,117 @@
+name: ด่านกัน agent ยกระดับสิทธิ์ตัวเอง
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+# ═══════════════════════════════════════════════════════════════
+# ภัยที่กันอยู่: Mason มี Write กับ Edit และ `contents: write`
+# PR ที่แก้ไฟล์ใน .github/ จึงเปลี่ยนสิทธิ์ของ workflow ปิดด่าน
+# หรือทำให้ secret หลุดในรอบถัดไปได้ — ทั้งหมดนี้ในรอบเดียวกับที่ดูเหมือนงานปกติ
+#
+# ⚠️ repo นี้เป็น **public** และหน้าเว็บถือ PAT อยู่ในเบราว์เซอร์
+#    ข้อ 2 (โทเคนหลุด) จึงร้ายแรงกว่าที่ ebr มาก — ประวัติ git ลบไม่ได้
+#
+# ⚠️ workflow ที่รันตอน pull_request คือ **เวอร์ชันที่อยู่ใน PR นั้นเอง**
+#    แปลว่า PR ที่ลบไฟล์นี้ทิ้งจะทำให้ job นี้ไม่รัน
+#    ตัวที่กันจริงคือ branch protection ที่ตั้ง job นี้เป็น **required check** —
+#    ถ้า check ไม่รายงานผล ปุ่ม merge จะไม่เขียวตลอดกาล
+#    ไม่ได้ตั้ง = ไฟล์นี้เป็นแค่ไฟแดงที่ merge ข้ามได้
+#
+# ลอกแบบมาจาก nse-manufac/plan แล้วปรับตามสิ่งที่ repo นี้หวง
+# ═══════════════════════════════════════════════════════════════
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: ตรวจสิ่งที่ agent ห้ามแตะ
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ตรวจไฟล์ที่เปลี่ยน
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$BASE_REF"
+          BASE="origin/$BASE_REF"
+
+          # quotepath=false ไม่งั้นชื่อไฟล์ภาษาไทยถูกแปลงเป็นเลขฐานแปดแล้วเทียบไม่ตรง
+          CHANGED=$(git -c core.quotepath=false diff --name-only "$BASE...HEAD")
+          # ไฟล์ที่ยังอยู่จริงใน PR — ไม่รวมของที่ถูกลบ ไม่งั้น PR ที่ "เก็บกวาด"
+          # ไฟล์ชั่วคราวเก่าออกจะโดนข้อ 5 ตีตกทั้งที่กำลังทำสิ่งที่ถูก
+          LIVING=$(git -c core.quotepath=false diff --name-only --diff-filter=d "$BASE...HEAD")
+
+          echo "branch: $HEAD_REF"
+          echo "ไฟล์ที่เปลี่ยน:"
+          echo "$CHANGED" | sed 's/^/  /'
+          echo ""
+
+          FAIL=0
+          agent_pr=0
+          case "$HEAD_REF" in agent/*|claude/*) agent_pr=1 ;; esac
+
+          # ── 1. PR จาก agent ห้ามแตะ .github/ เด็ดขาด ──
+          # นี่คือเหตุผลเดียวที่ไฟล์นี้มีอยู่ ข้ออื่นเป็นของแถมที่ราคาถูก
+          if [ "$agent_pr" -eq 1 ] && echo "$CHANGED" | grep -q "^.github/"; then
+            echo "::error::PR จาก branch ของ agent ($HEAD_REF) แก้ไฟล์ใน .github/ — ไม่อนุญาตเด็ดขาด"
+            echo "$CHANGED" | grep "^.github/" | sed 's/^/::error::  แตะ: /'
+            FAIL=1
+          fi
+
+          # ── 2. ห้ามมี secret หลุดเข้ามา ──
+          # repo นี้ private แต่ประวัติ git ลบไม่ได้ และโทเคนที่หลุดก็คือโทเคนที่หลุด
+          # ตรวจเฉพาะบรรทัดที่เพิ่มเข้ามา เพื่อไม่ให้ของเก่าทำ PR ใหม่แดง
+          ADDED=$(git diff "$BASE...HEAD" -- . ":(exclude)*.md" | grep "^+" || true)
+          leak() {
+            if printf "%s" "$ADDED" | grep -qE "$1"; then
+              echo "::error::พบ $2 ในบรรทัดที่เพิ่มเข้ามา"
+              FAIL=1
+            fi
+          }
+          leak "gh[pousr]_[A-Za-z0-9]{30,}"     "GitHub token"
+          leak "github_pat_[A-Za-z0-9_]{30,}"   "GitHub PAT"
+          leak "sk-ant-[A-Za-z0-9_-]{20,}"      "Anthropic API key"
+          leak "AKfyc[A-Za-z0-9_-]{20,}"        "URL ของ Apps Script deployment"
+
+          # ── 3. ห้ามถอดด่านออกจาก repo (life-web ไม่มี ADR ให้กัน) ──
+          # checks.mjs คือด่านเดียวที่จับ id ซ้ำ ตัวแปรซ้ำ และ fetch ออกนอก GitHub
+          # PR ที่ลบมันทิ้งคือ PR ที่ปิดไฟเตือนแทนที่จะดับไฟ
+          for must in checks.mjs checks.test.mjs; do
+            if git diff --name-status "$BASE...HEAD" | grep -qE "^D[[:space:]]+$must$"; then
+              echo "::error::PR นี้ลบ $must ทิ้ง — นั่นคือการปิดด่าน ไม่ใช่การแก้งาน"
+              FAIL=1
+            fi
+          done
+
+          # ── 4. ห้ามลบไฟล์เทสทิ้ง ──
+          # เทสแดงแปลว่าโค้ดผิด ไม่ใช่เทสผิด
+          # เทสของ repo นี้อยู่ที่ราก ไม่ได้อยู่ใน tests/
+          if git diff --name-status "$BASE...HEAD" | grep -qE "^D[[:space:]]+.*\.test\.(mjs|cjs|js)$"; then
+            echo "::error::PR นี้ลบไฟล์เทสทิ้ง — เทสแดงแปลว่าโค้ดผิด ไม่ใช่เทสผิด"
+            git diff --name-status "$BASE...HEAD" | grep -E "^D[[:space:]]+.*\.test\." | sed 's/^/::error::  /'
+            FAIL=1
+          fi
+
+          # ── 5. ไฟล์ชั่วคราวของ agent ห้ามติดเข้ามา ──
+          # เกิดขึ้นจริงกับ PR #3 — .pr-body.md 50 บรรทัดเข้าไปอยู่ในประวัติถาวร
+          # แก้ที่ workflow ไปแล้ว (ย้ายไป $RUNNER_TEMP ก่อน git add) ข้อนี้คือตาข่ายชั้นสอง
+          if echo "$LIVING" | grep -qE "^\.(pr-body|pr-failed|triage|question)"; then
+            echo "::error::มีไฟล์ชั่วคราวของ agent ติดเข้ามา — มันควรอยู่ใน \$RUNNER_TEMP ไม่ใช่ใน repo"
+            echo "$LIVING" | grep -E "^\.(pr-body|pr-failed|triage|question)" | sed 's/^/::error::  /'
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -eq 1 ]; then
+            exit 1
+          fi
+          echo "✓ ผ่าน — ไม่มีไฟล์ต้องห้ามถูกแตะ"
