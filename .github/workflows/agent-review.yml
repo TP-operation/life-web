@@ -33,6 +33,10 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # ต้องมี ไม่งั้น gh issue view ตอบ "could not resolve to a Repository"
+  # ซึ่งอ่านเหมือน repo หาย ทั้งที่จริงคือ issue ถูกซ่อน — เสียเวลาไล่ผิดทางได้ง่ายมาก
+  # พอประกาศบล็อกนี้เอง ทุกอย่างที่ไม่ได้เขียนจะเป็น none
+  issues: read
   id-token: write
 
 concurrency:
