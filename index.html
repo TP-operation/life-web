@@ -1287,21 +1287,50 @@ function scheduleAgents(live) {
   agentsState.timer = setTimeout(() => loadAgents({ quiet: true }), wait);
 }
 
-function agentCard(a, run, key, flipped) {
+const shortRepo = (r) => String(r).split('/')[1] ?? r;
+
+/**
+ * การ์ดใบเดียวต่อ agent หนึ่งตัว ถึงมันจะทำงานหลาย repo
+ *
+ * หน้าการ์ดตอบว่า **"ตอนนี้"** — มีที่ไหนรันอยู่ไหม ถ้าไม่มีก็รอบล่าสุดจากที่ไหนก็ได้
+ * หลังการ์ดตอบว่า **"ทั้งหมด"** — ทุก repo พร้อมสถานะของแต่ละอัน
+ *
+ * ชื่อ repo โผล่บนหน้าการ์ดเฉพาะตัวที่ทำงานหลาย repo — ตัวที่มีที่เดียว
+ * บอกชื่อ repo ไปก็ไม่ได้ตอบอะไรที่กลุ่มไม่ได้บอกอยู่แล้ว
+ *
+ * `where` = [{ repo, run }] เรียงรอบใหม่สุดมาก่อน
+ */
+function agentCard(a, where) {
+  const many = where.length > 1;
+  const running = where.filter((w) => w.run?.status === 'in_progress' || w.run?.status === 'queued');
+  const shown = running[0] ?? where.find((w) => w.run) ?? where[0];
+  const run = shown?.run ?? null;
   const started = run ? (run.run_started_at ?? run.created_at) : null;
-  const live = run && (run.status === 'in_progress' || run.status === 'queued');
-  const failed = run && run.conclusion === 'failure';
+  const live = running.length > 0;
+  const failed = !live && run?.conclusion === 'failure';
 
   let cls = 'agc off';
   if (live) cls = 'agc run';
   else if (failed) cls = 'agc bad';
   else if (run) cls = 'agc ok';
 
-  // [สัญลักษณ์+คำ, รายละเอียดที่ต่อท้าย] — ส่วนแรกมีสี ส่วนหลังจาง
-  const [word, detail] = !run ? ['— ยังไม่เคยรัน', '']
-    : live ? ['▶ กำลังรัน', fmtDur(started, null)]
-    : failed ? ['✗ ล้ม', fmtAgo(started)]
-    : ['✓ ผ่าน', fmtAgo(started)];   // ไม่เอาเวลาที่ใช้รันมาต่อ — สามท่อนบนการ์ดกว้าง 158px ตกบรรทัด
+  // เขียนเป็นคำสั่งทีละบรรทัด ไม่ใช่ ternary ซ้อน — สี่กรณีนี้ต่างกันจริง
+  const at = many && shown ? ` · ${shortRepo(shown.repo)}` : '';
+  let word = '— ยังไม่เคยรัน';
+  let detail = '';
+  if (running.length > 1) {
+    word = `▶ กำลังรัน ${running.length} ที่`;
+    detail = running.map((w) => shortRepo(w.repo)).join(' · ');
+  } else if (live) {
+    word = `▶ กำลังรัน${at}`;
+    detail = fmtDur(started, null);
+  } else if (failed) {
+    word = `✗ ล้ม${at}`;
+    detail = fmtAgo(started);
+  } else if (run) {
+    word = `✓ ผ่าน${at}`;
+    detail = fmtAgo(started);
+  }
 
   // ไม่มีไฟล์รูปก็ไม่พัง — ขึ้นตัวอักษรแรกของชื่อแทน
   const pic = a.portrait
@@ -1311,9 +1340,19 @@ function agentCard(a, run, key, flipped) {
 
   // ข้อจำกัดอยู่บนการ์ดเดียวกับชื่อ ไม่ใช่ในเอกสารที่ไม่มีใครเปิด
   // การให้ชื่อและหน้ากับ agent ทำให้เชื่อมันง่ายขึ้นโดยอัตโนมัติ นี่คือของถ่วง
+  const rows = where.map((w) => {
+    const r = w.run;
+    const st = !r ? '— ยังไม่เคยรัน'
+      : (r.status === 'in_progress' || r.status === 'queued') ? '▶ กำลังรัน'
+      : r.conclusion === 'failure' ? `✗ ล้ม · ${fmtAgo(r.run_started_at ?? r.created_at)}`
+      : `✓ ผ่าน · ${fmtAgo(r.run_started_at ?? r.created_at)}`;
+    return `<span class="bl"><b>${esc(shortRepo(w.repo))}</b> ${esc(st)}</span>`;
+  }).join('');
+
   const back = [
     `<span class="bn">${esc(a.name ?? '')}</span>`,
     a.model ? `<span class="bl">${esc(a.model)}</span>` : '',
+    rows,
     a.trigger ? `<span class="bl">ตื่นเมื่อ ${mdLite(a.trigger)}</span>` : '',
     a.cannot?.length
       ? `<span class="cant"><b>ทำไม่ได้</b>${a.cannot.map((c) => `<i>${mdLite(c)}</i>`).join('')}</span>`
@@ -1321,7 +1360,7 @@ function agentCard(a, run, key, flipped) {
     run ? `<a href="${esc(run.html_url ?? '')}" target="_blank" rel="noopener">ดู log รอบล่าสุด</a>` : '',
   ].join('');
 
-  return `<div class="${cls}" role="button" tabindex="0" aria-expanded="${flipped ? 'true' : 'false'}" data-key="${esc(key)}">
+  return `<div class="${cls}" role="button" tabindex="0" aria-expanded="false">
       <span class="flip">
         <span class="side front">${pic}<span class="meta">
           <span class="n">${esc(a.name ?? '')}</span>
@@ -1412,52 +1451,77 @@ function renderAgents({ registry, regError, results }) {
       <div class="muted">เพิ่มโน้ตใน <code>70-agents/</code> ไม่งั้นเลขที่นับว่าเรียกโมเดลจะต่ำกว่าจริง</div></div>`);
   }
 
-  // เรียง repo ให้ตัวที่มีอะไรเกิดขึ้นอยู่บน
+  // ── แบ่งตามงานที่ทำ ไม่ใช่ตาม repo ───────────────────────────────
+  //
+  // ของเดิมแบ่งเป็นเซคชันละ repo ซึ่งทำให้ **agent 11 ตัวถูกวาด 20 ใบ** —
+  // Mason · Vera · Scout อยู่คนละ 3 repo จึงโผล่คนละ 3 ที่
+  // เกือบครึ่งหน้าเป็นของซ้ำ และต้องเลื่อนหาว่าตัวที่สนใจอยู่ตรงไหน
+  //
+  // กลุ่มมาจากทะเบียน (`team:` ใน 70-agents/) ไม่ได้เขียนไว้ในไฟล์นี้ —
+  // ถ้า hardcode ไว้ที่นี่ มันจะหลุดจากของจริงวันที่เพิ่ม agent ตัวใหม่
+  const TEAM_LABEL = { office: 'Office', workshop: 'Workshop', nse: 'NSE' };
+  const TEAM_NOTE = {
+    office: 'งานเอกสาร — คัดแยก ตอบคำถาม สรุป ส่งต่อ',
+    workshop: 'แก้โค้ด — ทำงานข้าม repo',
+    nse: 'ฝั่งโรงงานที่บ้าน — คนละบัญชี GitHub',
+  };
+
   const readable = new Set(results.filter((r) => r.error === undefined).map((r) => r.repo));
-  const repos = [...new Set((registry.agents ?? []).flatMap((a) => a.repos ?? []))]
+
+  /** รอบล่าสุดของ agent ตัวนี้ในทุก repo ที่มันทำงาน — เรียงใหม่สุดขึ้นก่อน */
+  const runsOf = (a) => (a.repos ?? [])
     .filter((r) => readable.has(r))
-    .map((repo) => {
-      const list = (registry.agents ?? [])
-        .filter((a) => (a.repos ?? []).includes(repo))
-        .map((a) => ({ a, run: latest.get(agentKey(repo, a.workflow)) ?? null }));
-      list.sort((x, y) => {
-        const rank = (o) => (o.run?.status === 'in_progress' ? 0
-          : o.run?.conclusion === 'failure' ? 1
-          : o.a.kind === 'agent' ? 2 : 3);
-        return rank(x) - rank(y);
-      });
-      return {
-        repo,
-        list,
-        live: list.filter((o) => o.run?.status === 'in_progress').length,
-        bad: list.filter((o) => o.run?.conclusion === 'failure').length,
-        runs: week.filter((r) => r.repo === repo).length,
-      };
-    })
-    .sort((a, b) => (b.live - a.live) || (b.bad - a.bad));
+    .map((repo) => ({ repo, run: latest.get(agentKey(repo, a.workflow)) ?? null }))
+    .sort((x, y) => {
+      const t = (o) => (o.run ? Date.parse(startedAt(o.run)) : 0);
+      return t(y) - t(x);
+    });
+
+  const isLive = (run) => run?.status === 'in_progress' || run?.status === 'queued';
+
+  const teams = Object.keys(TEAM_LABEL).map((team) => {
+    const list = (registry.agents ?? [])
+      .filter((a) => a.kind === 'agent' && a.team === team)
+      .map((a) => ({ a, where: runsOf(a) }))
+      .filter((o) => o.where.length);
+    list.sort((x, y) => {
+      const rank = (o) => (o.where.some((w) => isLive(w.run)) ? 0
+        : o.where.some((w) => w.run?.conclusion === 'failure') ? 1 : 2);
+      return rank(x) - rank(y);
+    });
+    const repos = new Set(list.flatMap((o) => o.where.map((w) => w.repo)));
+    return {
+      team,
+      list,
+      live: list.filter((o) => o.where.some((w) => isLive(w.run))).length,
+      bad: list.filter((o) => o.where.some((w) => w.run?.conclusion === 'failure')).length,
+      runs: week.filter((r) => repos.has(r.repo)
+        && byKey.get(agentKey(r.repo, r.name))?.team === team).length,
+    };
+  }).filter((t) => t.list.length);
+
+  const section = (s) => {
+    const note = s.live ? `รัน ${s.live}` : s.bad ? `ล้ม ${s.bad}` : 'ว่าง';
+    return `<div class="rule">${esc(TEAM_LABEL[s.team])}
+        <span class="muted">${note} · ${s.runs} รอบใน 7 วัน</span></div>
+      <p class="muted" style="font-size:.7rem; margin:-6px 0 8px">${esc(TEAM_NOTE[s.team])}</p>
+      <div class="agdeck">${s.list.map((o) => agentCard(o.a, o.where)).join('')}</div>`;
+  };
 
   // สคริปต์ไม่ได้ขึ้นเป็นการ์ด — มันคำนวณ ไม่ได้ตัดสินอะไร ผลออกมาเหมือนเดิมทุกครั้ง
   // แต่**ยังต้องเห็นตอนมันล้ม** ไม่งั้นวันที่ checks แดงจะไม่มีอะไรบอกเลย
-  const section = (s) => {
-    const note = s.live ? `รัน ${s.live}` : s.bad ? `ล้ม ${s.bad}` : 'ว่าง';
-    const cards = s.list.filter((o) => o.a.kind === 'agent');
-    const scripts = s.list.filter((o) => o.a.kind !== 'agent');
-    const down = scripts.filter((o) => o.run?.conclusion === 'failure');
-    const tail = scripts.length
-      ? `<div class="scripts">สคริปต์ ${scripts.length} ตัว${down.length
-          ? ` — <span class="x">ล้ม: ${down.map((o) => esc(o.a.workflow)).join(' · ')}</span>`
+  // รวมเป็นบรรทัดเดียวท้ายหน้า ของเดิมกระจายอยู่ 16 บรรทัดใน 5 เซคชัน
+  const scriptRuns = (registry.agents ?? [])
+    .filter((a) => a.kind !== 'agent')
+    .flatMap((a) => (a.repos ?? []).filter((r) => readable.has(r))
+      .map((repo) => ({ a, repo, run: latest.get(agentKey(repo, a.workflow)) ?? null })));
+  const scriptsDown = scriptRuns.filter((o) => o.run?.conclusion === 'failure');
+  const scriptLine = scriptRuns.length
+    ? `<div class="scripts">สคริปต์ ${new Set(scriptRuns.map((o) => o.a.workflow)).size} ตัว${
+        scriptsDown.length
+          ? ` — <span class="x">ล้ม: ${scriptsDown.map((o) => `${esc(o.a.workflow)} ที่ ${esc(o.repo.split('/')[1])}`).join(' · ')}</span>`
           : ' — ปกติ'}</div>`
-      : '';
-    // ชื่อ repo ซ้ำกันข้ามบัญชีได้ — ถ้าไม่บอกเจ้าของ จะแยกไม่ออกว่าอันไหนของใคร
-    const [owner, short] = s.repo.split('/');
-    const who = owner === AGENT_OWNER ? '' : `<span class="muted"> ${esc(owner)}</span>`;
-    return `<div class="rule">${esc(short)}${who}
-        <span class="muted">${note} · ${s.runs} รอบใน 7 วัน</span></div>
-      <div class="agdeck">${cards.map((o) => {
-        const k = agentKey(s.repo, o.a.workflow);
-        return agentCard(o.a, o.run, k, flips[k]);
-      }).join('')}</div>${tail}`;
-  };
+    : '';
 
   // ตัวเลขที่นี่คือข้อเท็จจริงว่าเครื่องทำอะไรไป **ไม่ใช่คะแนนของเจ้าของ**
   // จึงไม่มีเป้า ไม่เทียบกับสัปดาห์ก่อน ไม่มีเครื่องหมายตกใจ (INVARIANTS §6.1)
@@ -1476,7 +1540,7 @@ function renderAgents({ registry, regError, results }) {
       <span><i class="bad"></i>✗ รอบล่าสุดล้ม</span>
       <span><i class="off"></i>— ยังไม่เคยรัน</span>
     </div>
-    ${repos.map(section).join('')}
+    ${teams.map(section).join('')}${scriptLine}
     <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อพลิกดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
     <div class="row" style="align-items:center; gap:10px">
       <button id="reloadAgents">โหลดใหม่</button>
