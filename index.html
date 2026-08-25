@@ -380,6 +380,14 @@
 
 <script>
 const REPO = 'TP-operation/life';
+// state/ ไม่ได้อยู่บน main แล้ว — ย้ายไป branch ของตัวเองชื่อ state
+//
+// เหตุผล: มันเป็นผลลัพธ์ที่สร้างใหม่ได้ ไม่ใช่ของที่คนเขียน แต่บอทเขียนทับ
+// วันละหลายรอบ ทำให้ vault ที่ sync ด้วย obsidian-git ชนซ้ำ ๆ
+// และเจ้าของแก้ไม่ได้เพราะ Obsidian เปิดไฟล์ .json ไม่ได้
+//
+// ⚠️ ทุก fetch ที่ดึงไฟล์ใน state/ ต้องมี ?ref=${STATE_REF} ไม่งั้นได้ 404
+const STATE_REF = 'state';
 const PATH = 'state/today.json';
 const WEEK_PATH = 'state/week.json';
 const PROJECTS_PATH = 'state/projects.json';
@@ -409,7 +417,7 @@ async function load() {
 
   let res;
   try {
-    res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PATH}`, {
+    res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PATH}?ref=${STATE_REF}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
       cache: 'no-store',
     });
@@ -435,7 +443,7 @@ async function load() {
 // สรุปสัปดาห์เป็นของเสริม — ถ้ายังไม่มีไฟล์ก็ไม่ต้องรบกวนหน้าจอ
 async function loadWeek(token) {
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${WEEK_PATH}`, {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${WEEK_PATH}?ref=${STATE_REF}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
       cache: 'no-store',
     });
@@ -450,7 +458,7 @@ async function loadWeek(token) {
 
 async function loadProjects(token) {
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PROJECTS_PATH}`, {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${PROJECTS_PATH}?ref=${STATE_REF}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
       cache: 'no-store',
     });
@@ -1206,7 +1214,7 @@ async function loadAgents({ quiet = false } = {}) {
   if (!registry || now - agentsState.registryAt > REGISTRY_EVERY) {
     try {
       registry = await ghJson(
-        `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}`,
+        `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}?ref=${STATE_REF}`,
         token, 'application/vnd.github.raw+json',
       );
       agentsState.registry = registry;
