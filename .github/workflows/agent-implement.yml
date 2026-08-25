@@ -107,7 +107,21 @@ jobs:
         run: |
           set -euo pipefail
           b="agent/issue-$ISSUE"
-          git checkout -b "$b"
+          # รอบสองของงานเดิม — ถ้า branch เก่ายังอยู่ ต้องต่อจากของเดิม ไม่ใช่เริ่มใหม่จาก main
+          #
+          # ⚠️ ถ้า checkout -b จาก main ทั้งที่ remote มี branch นี้แล้ว จะพังสองทางพร้อมกัน
+          #    1. งานรอบแรกหายหมด agent ทำซ้ำจากศูนย์โดยไม่รู้ตัว
+          #    2. git push โดนปฏิเสธเพราะ non-fast-forward แล้ว job ตายทั้ง job
+          #       ไฟล์นี้ push ตรง ไม่ได้ผ่าน push-retry.sh จึงไม่มีใครกู้ให้
+          if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then
+            git fetch --quiet origin "$b"
+            git checkout --quiet -B "$b" "origin/$b"
+            n=$(git rev-list --count "origin/main..$b")
+            echo "ต่อจาก branch เดิม $b — มี $n commit ที่ยังไม่เข้า main"
+          else
+            git checkout --quiet -b "$b"
+            echo "เริ่ม branch ใหม่ $b"
+          fi
           echo "name=$b" >> "$GITHUB_OUTPUT"
 
       # ⚠️ continue-on-error ไม่ใช่การกลบปัญหา — มันคือสิ่งที่ทำให้ **งานไม่หาย**
@@ -127,7 +141,7 @@ jobs:
           claude_args: |
             --model claude-opus-5
             --max-turns 70
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(ls:*),Bash(cat:*),Bash(node checks.mjs),Bash(node --test:*),Bash(git diff:*),Bash(git status:*),Bash(gh issue view:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(ls:*),Bash(cat:*),Bash(node checks.mjs),Bash(node --test:*),Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git checkout:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*)"
           prompt: |
             แก้งานตาม issue นี้ในโปรเจกต์ life-web — หน้าเว็บของระบบผู้ช่วยส่วนตัว
 
@@ -142,6 +156,29 @@ jobs:
             — ผลคัดกรอง · ข้อที่เจ้าของแก้ทีหลัง · งานที่ถูกตัดออกเพราะแก้ไปแล้ว — อยู่ในคอมเมนต์
             **ถ้าคอมเมนต์ขัดกับเนื้อ issue ให้เชื่อคอมเมนต์** เพราะมันใหม่กว่า
             โดยเฉพาะข้อที่บอกว่า issue เข้าใจโค้ดผิดตรงไหน — อ่านก่อนลงมือ
+
+            ## งานนี้อาจเคยทำมาแล้วรอบหนึ่ง — อ่านผลตรวจก่อนแตะโค้ด
+
+            branch ของงานนี้อาจมีของเดิมอยู่แล้ว และอาจมี PR ที่ผู้ตรวจอ่านไปแล้ว
+            **รายงานของผู้ตรวจอยู่ที่คอมเมนต์ของ PR ไม่ได้อยู่ใน issue** ต้องไปหยิบมาเอง
+
+            ```
+            git rev-parse --abbrev-ref HEAD
+            gh pr list --head <ชื่อ branch> --state open --json number,title
+            gh pr view <เลข PR> --json comments -q '.comments[].body'
+            ```
+
+            ถ้ามี ให้อ่านให้จบก่อนแตะโค้ด แล้วไล่แก้ทีละข้อในหัวข้อ **ต้องแก้ก่อน merge**
+            เขียนใน `.pr-body.md` ว่าข้อไหนแก้แล้ว ข้อไหนไม่แก้และเพราะอะไร — **ห้ามเงียบ**
+
+            **ถ้ารอบก่อนถูกด่านตีตกเพราะแตะไฟล์ต้องห้าม ต้องเอากลับด้วย**
+
+            ```
+            git checkout origin/main -- <ไฟล์ที่ด่านทัก>
+            git diff origin/main --name-only
+            ```
+
+            บรรทัดที่สองคือการยืนยันว่าไม่เหลือไฟล์ต้องห้ามจริง — **ทำก่อนจบรอบเสมอ**
 
             ## repo นี้มีรูปร่างแบบไหน
 
