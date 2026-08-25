@@ -45,7 +45,7 @@ jobs:
 
           n=$(gh issue list --state open --label "อนุมัติแล้ว" \
                 --json number,author --limit 20 \
-                -q "[.[] | select(.author.login == \"$OWNER\")] | sort_by(.number) | .[0].number // empty")
+                -q "[.[] | select(.author.login == \"$OWNER\" or .author.is_bot)] | sort_by(.number) | .[0].number // empty")
 
           if [ -z "$n" ]; then
             echo "ไม่มีงานที่ติดป้าย 'อนุมัติแล้ว' รออยู่ — เป็นสถานะปกติ"

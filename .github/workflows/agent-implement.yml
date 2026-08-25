@@ -56,7 +56,7 @@ jobs:
           if [ -z "$n" ]; then
             n=$(gh issue list --state open --label "พร้อมแก้" \
                   --json number,author --limit 20 \
-                  -q "[.[] | select(.author.login == \"$OWNER\")] | sort_by(.number) | .[0].number // empty")
+                  -q "[.[] | select(.author.login == \"$OWNER\" or .author.is_bot)] | sort_by(.number) | .[0].number // empty")
           fi
           if [ -z "$n" ]; then
             echo "ไม่มี issue ที่ติดป้าย 'พร้อมแก้' รออยู่"
