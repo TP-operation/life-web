@@ -1085,7 +1085,24 @@ const AGENTS_PATH = 'state/agents.json';
 // (INVARIANTS §8.5) ถ้าวันหนึ่งมีคนใส่ repo ฝั่งที่ทำงานลงทะเบียน ตัวนี้จะกันไว้เอง
 const AGENT_OWNER = 'TP-operation';
 
-const agentsState = { loading: false, loaded: false };
+// จังหวะการถามซ้ำ — ตัวเลขพวกนี้ถูกกำหนดโดยเพดานของ GitHub ไม่ใช่ความรู้สึก
+//
+//   repo ของเรา   ใส่โทเคน  เพดาน 5,000 ครั้ง/ชม.  ถามถี่ได้สบาย
+//   repo ฝั่ง nse  ไม่ใส่โทเคน เพดาน **60 ครั้ง/ชม. ต่อ IP** และแชร์กับคนอื่นที่ออกเน็ตทางเดียวกัน
+//
+// ถ้าถามทุก 10 วิเท่ากันหมด ฝั่ง nse จะเต็มเพดานใน 15 นาทีแล้วหน้าจะขึ้นแดงทั้งแถบ
+// จึงแยกจังหวะ และเร็วเฉพาะตอนที่มีอะไรกำลังรันจริง — ตอนว่างไม่มีอะไรให้ดูอยู่แล้ว
+const AGENT_TICK_LIVE = 10000;    // มีตัวกำลังรัน — ตัวเลขเวลาต้องเดิน
+const AGENT_TICK_IDLE = 45000;    // ไม่มีอะไรรัน
+const AGENT_TICK_COOL = 300000;   // ชนเพดาน — ถอยยาว
+const FOREIGN_EVERY   = 300000;   // repo บัญชีอื่น ถามทุก 5 นาทีพอ
+const REGISTRY_EVERY  = 600000;   // ทะเบียนแทบไม่เปลี่ยน
+
+const agentsState = {
+  loading: false, loaded: false, timer: null,
+  sig: '', checkedAt: 0, registry: null, registryAt: 0,
+  foreign: [], foreignAt: 0, cooldownUntil: 0,
+};
 
 const agentKey = (repo, workflow) => `${repo}::${workflow}`;
 
@@ -1160,30 +1177,49 @@ async function ghJson(url, token, accept) {
   return r.json();
 }
 
-async function loadAgents() {
+/** ลายเซ็นของสิ่งที่เห็นอยู่ — ใช้ตัดสินว่ารอบนี้ต้องวาดใหม่ไหม */
+function agentsSignature(registry, results) {
+  const runs = results.flatMap((r) => (r.runs ?? []).map(
+    (w) => `${r.repo}/${w.id}/${w.status}/${w.conclusion ?? ''}`));
+  const errs = results.map((r) => `${r.repo}:${r.error ?? ''}`);
+  return [registry?.generatedAt ?? '', ...errs, ...runs.sort()].join('|');
+}
+
+async function loadAgents({ quiet = false } = {}) {
   const token = getToken();
   if (!token || agentsState.loading) return;
   agentsState.loading = true;
-  $('agents').innerHTML = '<div class="rule">agent</div><div class="task muted">กำลังถาม GitHub…</div>';
+  if (!quiet) {
+    $('agents').innerHTML = '<div class="rule">agent</div><div class="task muted">กำลังถาม GitHub…</div>';
+  }
+
+  const now = Date.now();
 
   // ทะเบียนมาก่อน — ถ้าไม่มีทะเบียนก็ไม่รู้ว่าตัวไหนคือใคร
-  let registry = null;
+  // แต่มันแทบไม่เปลี่ยน (เปลี่ยนตอน daily-plan รันเท่านั้น) จึงไม่ต้องถามทุกรอบ
+  let registry = agentsState.registry;
   let regError = null;
-  try {
-    registry = await ghJson(
-      `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}`,
-      token, 'application/vnd.github.raw+json',
-    );
-  } catch (e) {
-    regError = e.status ?? e.message;
+  if (!registry || now - agentsState.registryAt > REGISTRY_EVERY) {
+    try {
+      registry = await ghJson(
+        `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}`,
+        token, 'application/vnd.github.raw+json',
+      );
+      agentsState.registry = registry;
+      agentsState.registryAt = now;
+    } catch (e) {
+      regError = e.status ?? e.message;
+      registry = agentsState.registry;   // ของเก่ายังดีกว่าไม่มีอะไรเลย
+    }
   }
 
   // repo ของบัญชีอื่นถูกถามได้ แต่**ไม่ส่งโทเคนไปด้วยเด็ดขาด** (INVARIANTS §8.5)
   // ถ้าเป็น public จะได้ข้อมูลกลับมา ถ้า private จะได้ 404 แล้วบอกไปตรง ๆ ว่าอ่านจากที่นี่ไม่ได้
   const repos = [...new Set((registry?.agents ?? []).flatMap((a) => a.repos ?? []))];
+  const mine = repos.filter((r) => r.startsWith(`${AGENT_OWNER}/`));
+  const others = repos.filter((r) => !r.startsWith(`${AGENT_OWNER}/`));
 
-  const results = await Promise.all(repos.map(async (repo) => {
-    const own = repo.startsWith(`${AGENT_OWNER}/`);
+  const ask = async (repo, own) => {
     try {
       const j = await ghJson(
         `https://api.github.com/repos/${repo}/actions/runs?per_page=40`,
@@ -1193,11 +1229,62 @@ async function loadAgents() {
     } catch (e) {
       return { repo, own, error: e.status ?? e.message };
     }
-  }));
+  };
+
+  const mineOut = await Promise.all(mine.map((r) => ask(r, true)));
+
+  // ฝั่งบัญชีอื่นถามห่าง ๆ แล้วใช้ของเดิมระหว่างนั้น — เพดาน 60 ครั้ง/ชม.ต่อ IP
+  // ถ้าถามทุกรอบเหมือนของเรา จะเต็มก่อนแล้วลากทั้งหน้าลงไปด้วย
+  let othersOut = agentsState.foreign;
+  if (others.length && (now - agentsState.foreignAt > FOREIGN_EVERY || !othersOut.length)) {
+    othersOut = await Promise.all(others.map((r) => ask(r, false)));
+    agentsState.foreign = othersOut;
+    agentsState.foreignAt = now;
+    // 403 จากฝั่งไม่ใส่โทเคน = ชนเพดาน IP ไม่ใช่สิทธิ์ไม่พอ — ถอยให้ยาวกว่าปกติ
+    if (othersOut.some((r) => r.error === 403)) agentsState.foreignAt = now + FOREIGN_EVERY * 2;
+  }
+
+  const results = [...mineOut, ...othersOut.filter((r) => repos.includes(r.repo))];
 
   agentsState.loading = false;
   agentsState.loaded = true;
-  renderAgents({ registry, regError, results });
+  agentsState.checkedAt = Date.now();
+
+  // ชนเพดานฝั่งเรา — ถอยยาวแล้วบอกให้รู้ ไม่ใช่ยิงซ้ำจนโดนแบนนานกว่าเดิม
+  if (mineOut.some((r) => r.error === 403)) {
+    agentsState.cooldownUntil = Date.now() + AGENT_TICK_COOL;
+  }
+
+  const live = results.some((r) => (r.runs ?? []).some(
+    (w) => w.status === 'in_progress' || w.status === 'queued'));
+  const sig = agentsSignature(registry, results);
+
+  // มีตัวกำลังรัน = ตัวเลขเวลาต้องเดิน จึงวาดใหม่ทุกรอบ
+  // ตอนว่างวาดใหม่เฉพาะตอนของเปลี่ยนจริง ไม่งั้นหน้าจะกระพริบทุก 45 วิโดยไม่ได้อะไร
+  if (live || sig !== agentsState.sig || !quiet) {
+    agentsState.sig = sig;
+    renderAgents({ registry, regError, results });
+  } else {
+    stampAgentsChecked();
+  }
+
+  scheduleAgents(live);
+}
+
+/** เขียนเวลาที่ถามครั้งล่าสุด โดยไม่ต้องวาดทั้งหน้าใหม่ */
+function stampAgentsChecked() {
+  const el = $('agentsChecked');
+  if (el) el.textContent = agentsState.checkedAt ? `ตรวจล่าสุด ${fmtAgo(new Date(agentsState.checkedAt).toISOString())}` : '';
+}
+
+/** ตั้งรอบถัดไป — หยุดเองเมื่อออกจากแท็บหรือสลับไปหน้าต่างอื่น */
+function scheduleAgents(live) {
+  clearTimeout(agentsState.timer);
+  agentsState.timer = null;
+  if (currentTab() !== 'agents' || document.visibilityState !== 'visible') return;
+  const cooling = Date.now() < agentsState.cooldownUntil;
+  const wait = cooling ? AGENT_TICK_COOL : (live ? AGENT_TICK_LIVE : AGENT_TICK_IDLE);
+  agentsState.timer = setTimeout(() => loadAgents({ quiet: true }), wait);
 }
 
 function agentCard(a, run, key, flipped) {
@@ -1391,11 +1478,15 @@ function renderAgents({ registry, regError, results }) {
     </div>
     ${repos.map(section).join('')}
     <p class="muted" style="margin-top:12px">กดที่การ์ดเพื่อพลิกดูว่าตัวนั้นทำอะไรไม่ได้ · แก้ทะเบียนที่ <code>70-agents/</code> ใน Obsidian</p>
-    <div class="row"><button id="reloadAgents">โหลดใหม่</button></div>`;
+    <div class="row" style="align-items:center; gap:10px">
+      <button id="reloadAgents">โหลดใหม่</button>
+      <span class="muted" style="font-size:.7rem">อัปเดตเอง · <span id="agentsChecked"></span></span>
+    </div>`;
 
   wireFlips($('agents'));
+  stampAgentsChecked();
   const btn = $('reloadAgents');
-  if (btn) btn.onclick = loadAgents;
+  if (btn) btn.onclick = () => loadAgents();
 }
 
 const TABS = {
@@ -1408,6 +1499,17 @@ const TABS = {
 const TAB_KEY = 'life_tab';
 
 const currentTab = () => (TABS[localStorage.getItem(TAB_KEY)] ? localStorage.getItem(TAB_KEY) : 'today');
+
+// แท็บที่ถูกซ่อนอยู่ไม่ควรเผาโควต้าทั้งวัน — หยุดตอนสลับไปหน้าต่างอื่น
+// แล้วถามทันทีตอนกลับมา เพราะสิ่งที่อยากรู้ตอนกลับมาคือ "ตอนนี้" ไม่ใช่ "เมื่อ 45 วิที่แล้ว"
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') {
+    clearTimeout(agentsState.timer);
+    agentsState.timer = null;
+  } else if (currentTab() === 'agents' && agentsState.loaded) {
+    loadAgents({ quiet: true });
+  }
+});
 
 function showTab(name) {
   const tab = TABS[name] ? name : 'today';
@@ -1423,7 +1525,13 @@ function showTab(name) {
   localStorage.setItem(TAB_KEY, tab);
 
   // โหลดตอนกดเข้าแท็บเท่านั้น — คนที่ไม่เคยเปิดดูไม่ควรเสียโควต้า API ทุกครั้งที่เปิดหน้า
-  if (tab === 'agents' && !agentsState.loaded) loadAgents();
+  if (tab === 'agents') {
+    if (!agentsState.loaded) loadAgents();
+    else { stampAgentsChecked(); loadAgents({ quiet: true }); }
+  } else {
+    clearTimeout(agentsState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม
+    agentsState.timer = null;
+  }
 }
 
 for (const b of document.querySelectorAll('nav.tabs button')) {
