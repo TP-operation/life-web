@@ -45,6 +45,17 @@ concurrency:
 
 jobs:
   pick:
+    # ⚠️ ทาง pull_request ใช้กับ push ของ agent ไม่ได้ ต้องข้ามให้ workflow_run ทำแทน
+    #
+    # claude-code-action มีด่านของตัวเองที่ปฏิเสธ bot:
+    #   "Workflow initiated by non-human actor: github-actions (type: Bot)"
+    # agent push ด้วย GITHUB_TOKEN → event synchronize มี actor เป็น bot → ล้มทุกครั้ง
+    # ถ้าไม่ข้าม จะได้ run แดงปลอมค้างบน PR ทุกรอบ และถ้าไปเปิด allowed_bots แทน
+    # จะกลายเป็นรันซ้อนกันสองตัวแล้วคอมเมนต์สองรอบ เสียค่ารันฟรี
+    # (25 ส.ค. 2026 PR #51 รอบสอง)
+    if: >-
+      github.event_name != 'pull_request'
+      || !endsWith(github.actor, '[bot]')
     runs-on: ubuntu-latest
     outputs:
       found: ${{ steps.q.outputs.found }}
