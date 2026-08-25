@@ -106,8 +106,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: |
             --model claude-opus-5
-            --max-turns 40
-            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(ls:*),Bash(node:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*)"
+            --max-turns 70
+            --allowedTools "Read,Write,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(node:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*)"
           prompt: |
             ตรวจ PR #${{ needs.pick.outputs.pr }} ของ life-web ก่อนที่เจ้าของจะอ่าน
 
@@ -168,7 +168,16 @@ jobs:
 
             ## วิธีเขียนรายงาน
 
-            ภาษาไทย · คอมเมนต์ที่ PR ด้วย `gh pr comment ${{ needs.pick.outputs.pr }} --body "..."` **ครั้งเดียว**
+            ภาษาไทย · **เขียนรายงานลงไฟล์ `review-report.md` ด้วยเครื่องมือ Write ก่อน**
+            แล้วส่งด้วย `gh pr comment ${{ needs.pick.outputs.pr }} --body-file review-report.md` **ครั้งเดียว**
+
+            ⚠️ **ห้ามยัดรายงานยาวใส่ `--body "..."` ตรง ๆ**  ข้อความไทยหลายย่อหน้าในอาร์กิวเมนต์เดียว
+               พังเรื่องเครื่องหมายคำพูดทุกครั้ง เสียเทิร์นฟรีรอบละหนึ่ง
+               ไฟล์นี้ไม่มีทางหลุดออกไป เพราะคุณไม่มีสิทธิ์ commit และ job ไม่มี push
+
+            ⚠️ **ส่งคอมเมนต์ทันทีที่รายงานพอใช้ได้ อย่ารอให้สมบูรณ์**
+               ถ้าเทิร์นหมดก่อนส่ง เจ้าของจะไม่ได้อะไรเลยทั้งที่จ่ายค่ารันไปแล้ว
+               ของที่ยังไม่ได้ตรวจ ให้เขียนไว้ในรายงานว่ายังไม่ได้ตรวจ ดีกว่าไม่มีรายงาน
 
             ขึ้นต้นด้วยบรรทัดเดียวว่าเจอกี่เรื่องที่ต้องแก้ก่อน merge แล้วแยกเป็น
             **ต้องแก้ก่อน merge** กับ **ข้อสังเกต ไม่บล็อก** · แต่ละข้อบอกไฟล์และบรรทัด
