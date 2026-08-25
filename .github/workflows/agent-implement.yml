@@ -127,7 +127,7 @@ jobs:
           claude_args: |
             --model claude-opus-5
             --max-turns 70
-            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(ls:*),Bash(cat:*),Bash(node checks.mjs),Bash(node --test:*),Bash(git diff:*),Bash(git status:*)"
+            --allowedTools "Read,Write,Edit,Grep,Glob,Bash(ls:*),Bash(cat:*),Bash(node checks.mjs),Bash(node --test:*),Bash(git diff:*),Bash(git status:*),Bash(gh issue view:*)"
           prompt: |
             แก้งานตาม issue นี้ในโปรเจกต์ life-web — หน้าเว็บของระบบผู้ช่วยส่วนตัว
 
@@ -135,7 +135,12 @@ jobs:
 
             ${{ needs.pick.outputs.body }}
 
-            คอมเมนต์ผลคัดกรองอยู่ใน issue แล้ว ถ้ามีข้อความในนั้นให้ใช้เป็นจุดตั้งต้น
+            **อ่านคอมเมนต์ใน issue ก่อนลงมือเสมอ**
+            `gh issue view ${{ needs.pick.outputs.number }} --json comments -q ".comments[].body"`
+
+            เนื้อ issue ที่ส่งมาให้ข้างบนคือ**ตอนเปิดครั้งแรกเท่านั้น** สิ่งที่เกิดขึ้นหลังจากนั้น
+            — ผลคัดกรอง · ข้อที่เจ้าของแก้ทีหลัง · งานที่ถูกตัดออกเพราะแก้ไปแล้ว — อยู่ในคอมเมนต์
+            **ถ้าคอมเมนต์ขัดกับเนื้อ issue ให้เชื่อคอมเมนต์** เพราะมันใหม่กว่า
             โดยเฉพาะข้อที่บอกว่า issue เข้าใจโค้ดผิดตรงไหน — อ่านก่อนลงมือ
 
             ## repo นี้มีรูปร่างแบบไหน
@@ -231,6 +236,7 @@ jobs:
           node --test checks.test.mjs
 
       - name: เปิด PR
+        id: pr
         if: steps.ask.outputs.asked != '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -277,6 +283,7 @@ jobs:
           git add -A
           git commit -m "$TITLE (#$ISSUE)"
           git push -u origin "$BRANCH"
+          echo "pushed=1" >> "$GITHUB_OUTPUT"
 
           # ถ้าเปิด PR ไม่ได้ ห้ามเงียบ — branch ถูก push ไปแล้ว งานอยู่บน remote ครบ
           if url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$body_file" 2>&1); then
@@ -298,7 +305,17 @@ jobs:
       # ไม่ใช่ตายก่อนแล้วค่อยเสียดาย
       - name: รอบนี้ไม่เรียบร้อย ให้ run เป็นสีแดง
         if: steps.claude.outcome == 'failure'
+        env:
+          # สัญญาณที่เชื่อได้คือ "งานลงถึง remote และผ่านด่านไหม" ไม่ใช่ข้อความ error ของ action
+          LANDED: ${{ steps.pr.outputs.pushed }}
+          GATE: ${{ steps.test.outcome }}
         run: |
+          # "ชนเพดานเทิร์นทั้งที่งานเสร็จ" กับ "งานไม่เสร็จ" ไม่ใช่เรื่องเดียวกัน
+          # ถ้าทำให้แดงเหมือนกันหมด อีกไม่นานสีแดงจะไม่มีความหมาย (INVARIANTS §6.4)
+          if [ "${LANDED:-}" = "1" ] && [ "${GATE:-}" = "success" ]; then
+            echo "::warning::agent จบไม่เรียบร้อย (มักเป็นการชนเพดานเทิร์น) แต่งานลงครบและผ่านด่านแล้ว — ตรวจตามปกติ"
+            exit 0
+          fi
           echo "::error::agent จบแบบไม่เรียบร้อย — ถ้ามี PR เปิดให้แล้ว ของยังอยู่ครบ แต่ต้องอ่านให้ละเอียดกว่าปกติ"
           exit 1
 
