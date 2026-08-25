@@ -325,6 +325,26 @@ jobs:
           # ถ้าเปิด PR ไม่ได้ ห้ามเงียบ — branch ถูก push ไปแล้ว งานอยู่บน remote ครบ
           if url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$body_file" 2>&1); then
             gh issue comment "$ISSUE" --body "เปิด PR ให้แล้ว → $url"
+          elif printf '%s' "$url" | grep -q 'already exists'; then
+            # รอบสองของงานเดิม — PR เปิดค้างอยู่แล้ว ไม่ใช่ความล้มเหลว
+            #
+            # ⚠️ ห้ามทิ้ง $body_file ตรงนี้ มันคือรายงานว่ารอบนี้ทำอะไรไปบ้าง
+            #    ถ้าไม่เอาไปแปะที่ PR จะไม่มีที่ไหนเก็บเลย ผู้ตรวจกับเจ้าของอ่านไม่เจอ
+            #    (25 ส.ค. 2026 รอบสองของ #50 เสียรายงานไปทั้งอันเพราะเข้าทาง else)
+            n=$(printf '%s' "$url" | grep -oE '[0-9]+$' | tail -1)
+            {
+              echo "## รอบใหม่ push ขึ้น branch แล้ว"
+              echo
+              cat "$body_file"
+            } > "$RUNNER_TEMP/pr-update.md"
+            if [ -n "$n" ]; then
+              gh pr comment "$n" --body-file "$RUNNER_TEMP/pr-update.md"
+              gh issue comment "$ISSUE" --body "อัปเดต PR เดิมให้แล้ว → $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$n"
+              echo "PR #$n มีอยู่แล้ว — แปะรายงานรอบนี้เป็นคอมเมนต์แทน"
+            else
+              echo "::warning::PR มีอยู่แล้วแต่หาเลข PR ไม่เจอ — $url"
+              gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/pr-update.md"
+            fi
           else
             echo "::warning::เปิด PR ไม่ได้ — $url"
             {
