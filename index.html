@@ -1324,7 +1324,10 @@ async function loadChat() {
     for (const it of mine) {
       ev.push({
         at: it.created_at, me: true, num: it.number,
-        text: [it.title, stripMark(it.body)].filter(Boolean).join('\n'),
+        // เนื้อเก็บข้อความเต็มอยู่แล้วทั้งทางหน้าเว็บและทาง LINE จึงใช้เนื้อก่อน
+        // หัวข้อถูกตัดที่ 80 ตัว เอามาแสดงจะได้ข้อความที่ขาดกลางคัน
+        // ของเก่าก่อน 26 ส.ค. 2026 เนื้อว่าง จึงต้องมีทางถอยไปใช้หัวข้อ
+        text: stripMark(it.body) || it.title,
       });
     }
     for (const c of (Array.isArray(comments) ? comments : [])) {
@@ -1448,8 +1451,13 @@ async function sendChat() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        // ⚠️ เนื้อต้องเป็นข้อความเต็มเสมอ ไม่ใช่แค่บรรทัดที่เหลือ
+        //    หัวข้อถูกตัดที่ 80 ตัวเพราะ GitHub แสดงได้เท่านั้น ถ้าเนื้อเก็บแค่ที่เหลือ
+        //    ข้อความที่พิมพ์ยาวรวดเดียวบรรทัดเดียวจะหายทันทีตั้งแต่ตัวที่ 81
+        //    เกิดขึ้นจริงกับ issue #54 และ #65 เมื่อ 26 ส.ค. 2026 สองครั้งติด
+        //    แล้ว Iris ต้องนั่งเดาว่าคำที่ขาดคืออะไร
         title: lines[0].slice(0, 80),
-        body: `${lines.slice(1).join('\n')}\n\n---\n${CHAT_MARK}`.trim(),
+        body: `${text}\n\n---\n${CHAT_MARK}`,
       }),
     });
     chatState.pending = chatState.pending.filter((t) => t !== text);
