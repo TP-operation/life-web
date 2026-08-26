@@ -115,6 +115,17 @@
   .cell .dot.late{background:var(--crit)}
   .cell .sp{display:block; font-size:.6rem; line-height:1.2; opacity:.8;
             overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  /* นัดต่างจากงาน — เลื่อนไม่ได้ จึงเขียนเวลาให้เห็นเลย ไม่ใช่แค่จุด */
+  .cell .ap{display:block; font-size:.6rem; line-height:1.25; font-weight:700;
+            color:var(--accent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .cell.sel .ap{color:#fff}
+  #calDay .aitem{display:block; padding:8px 0; border-top:1px solid var(--line); font-size:.86rem}
+  #calDay .aitem .t{display:inline-block; min-width:74px; font-weight:700; color:var(--accent)}
+  .cmode{display:flex; gap:6px; margin:12px 0 6px}
+  .cmode button{flex:1; padding:8px; font:inherit; font-size:.82rem; cursor:pointer;
+                color:inherit; background:transparent; border:1px solid var(--line);
+                border-radius:9px; -webkit-appearance:none}
+  .cmode button.on{background:var(--accent); color:#fff; border-color:transparent}
   #calDay{margin-top:12px}
   #calDay .dhead{display:block; font-weight:600; margin-bottom:6px}
   #calDay .ditem{display:block; padding:8px 0; border-top:1px solid var(--line); font-size:.86rem}
@@ -1336,7 +1347,7 @@ const CAL_CONTEXT = [
 ];
 const CAL_DEFAULT_EST = 1;
 
-const calState = { data: null, ym: null, sel: null, ctx: 'work' };
+const calState = { data: null, ym: null, sel: null, ctx: 'work', mode: 'task' };
 
 const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
@@ -1365,6 +1376,16 @@ async function loadCalendar() {
   }
 }
 
+/** ป้ายนัดในช่องปฏิทิน — เขียนเวลาให้เห็นเลยเพราะนัดเลื่อนไม่ได้
+    มีหลายนัดในวันเดียวก็บอกจำนวน ไม่ยัดจนล้นช่อง */
+function apLabel(info) {
+  const list = info?.appointments ?? [];
+  if (!list.length) return '';
+  if (list.length > 1) return `<span class="ap">นัด ${list.length}</span>`;
+  const a = list[0];
+  return `<span class="ap">${esc(a.allDay ? 'ทั้งวัน' : a.from)}</span>`;
+}
+
 function renderMonth() {
   const { y, m } = calState.ym;
   const days = calState.data?.days ?? {};
@@ -1390,6 +1411,7 @@ function renderMonth() {
     cells.push(`<button type="button" class="${cls.join(' ')}" data-date="${esc(date)}">
         <span class="d">${d}</span>
         ${info?.special ? `<span class="sp">${esc(info.special.kindWord)}</span>` : ''}
+        ${apLabel(info)}
         <span class="dots">${dots}</span>
       </button>`);
   }
@@ -1406,30 +1428,51 @@ function renderDay() {
   const [, mm, dd] = date.split('-');
   const head = `${Number(dd)} ${CAL_MONTH[Number(mm) - 1]}`;
 
+  // นัดขึ้นก่อนงานเสมอ — มันเลื่อนไม่ได้ ที่เหลือของวันต้องวางรอบมัน
+  const appts = (info?.appointments ?? []).map((a) => `<span class="aitem">
+      <span class="t">${esc(a.allDay ? 'ทั้งวัน' : (a.to ? `${a.from}-${a.to}` : a.from))}</span>${esc(a.what)}
+    </span>`).join('');
+
   const items = (info?.tasks ?? []).map((t) => `<span class="ditem">
       <b${t.overdue ? ' class="late"' : ''}>${esc(t.title)}</b>
       <span class="dmeta">${esc([t.context, t.est ? `${t.est} ชม.` : '', t.overdue ? 'เลยกำหนด' : '']
         .filter(Boolean).join(' · '))}</span>
     </span>`).join('');
 
-  const chips = CAL_CONTEXT.map((c) => `<button type="button" class="cctx${c.v === calState.ctx ? ' on' : ''}"
-      data-ctx="${c.v}">${esc(c.label)}</button>`).join('');
+  const isTask = calState.mode === 'task';
+  const chips = isTask
+    ? `<div class="chips">${CAL_CONTEXT.map((c) => `<button type="button" class="cctx${c.v === calState.ctx ? ' on' : ''}"
+        data-ctx="${c.v}">${esc(c.label)}</button>`).join('')}</div>`
+    : '';
 
   $('calDay').innerHTML = `
     <span class="dhead">${esc(head)}${info?.special ? ` · ${esc(info.special.kindWord)} ${esc(info.special.note)}` : ''}</span>
-    ${items || '<span class="ditem muted">ยังไม่มีงานลงวันนี้</span>'}
-    <div class="chips" style="margin-top:10px">${chips}</div>
+    ${appts}
+    ${items}
+    ${appts || items ? '' : '<span class="ditem muted">ยังไม่มีอะไรลงวันนี้</span>'}
+    <div class="cmode">
+      <button type="button" data-mode="task" class="${isTask ? 'on' : ''}">เพิ่มงาน</button>
+      <button type="button" data-mode="appt" class="${isTask ? '' : 'on'}">เพิ่มนัด</button>
+    </div>
+    ${chips}
     <span class="row">
-      <input id="calAdd" placeholder="เพิ่มงานลงวันนี้" style="flex:1; min-width:0">
+      ${isTask ? '' : '<input id="calTime" placeholder="14:00 หรือ 14:00-16:00" style="flex:0 1 150px; min-width:0">'}
+      <input id="calAdd" placeholder="${isTask ? 'ชื่องาน' : 'นัดอะไร'}" style="flex:1; min-width:0">
       <button type="button" class="primary" id="calAddGo">เพิ่ม</button>
     </span>
-    <span class="qmsg" id="calAddMsg">ตั้งต้น ${CAL_DEFAULT_EST} ชม. แก้ทีหลังในไฟล์งานได้</span>`;
+    <span class="qmsg" id="calAddMsg">${isTask
+      ? `ตั้งต้น ${CAL_DEFAULT_EST} ชม. แก้ทีหลังในไฟล์งานได้`
+      : 'ไม่ใส่เวลาถือว่าทั้งวัน'}</span>`;
 
+  for (const c of $('calDay').querySelectorAll('.cmode button')) {
+    c.onclick = () => { calState.mode = c.dataset.mode; renderDay(); };
+  }
   for (const c of $('calDay').querySelectorAll('.cctx')) {
     c.onclick = () => { calState.ctx = c.dataset.ctx; renderDay(); };
   }
-  $('calAddGo').onclick = addTaskOnDay;
-  $('calAdd').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addTaskOnDay(); } };
+  const go = () => (calState.mode === 'task' ? addTaskOnDay() : addApptOnDay());
+  $('calAddGo').onclick = go;
+  $('calAdd').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
 }
 
 /** เพิ่มงานลงวันที่เลือก — เดินทางเดียวกับที่พิมพ์ "เพิ่มงาน ..." ในแชท */
@@ -1467,6 +1510,49 @@ async function addTaskOnDay() {
     setTimeout(loadCalendar, 30000);
   } catch (e) {
     msg.textContent = `เพิ่มไม่สำเร็จ — ${e.message}`;
+  } finally {
+    $('calAddGo').disabled = false;
+  }
+}
+
+/** เพิ่มนัดลงวันที่เลือก — เดินทางเดียวกับที่พิมพ์ "นัด ..." ในแชทหรือใน LINE */
+async function addApptOnDay() {
+  const box = $('calAdd');
+  const what = box.value.trim();
+  const msg = $('calAddMsg');
+  if (!what) return;
+  const token = getToken();
+  if (!token) return;
+
+  const time = ($('calTime')?.value ?? '').trim();
+  $('calAddGo').disabled = true;
+  msg.textContent = 'กำลังจด…';
+  try {
+    // issue-intake.mjs อ่านวันกับเวลาจากเนื้อเป็นบรรทัด key: value
+    // เวลาว่างแปลว่าทั้งวัน ตัวตรวจฝั่งสคริปต์เป็นคนตัดสินว่ารูปแบบใช้ได้ไหม
+    const body = [`date: ${calState.sel}`, time ? `time: ${time}` : ''].filter(Boolean).join('\n');
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `นัด ${what}`.slice(0, 80), body }),
+    });
+    if (!res.ok) {
+      msg.innerHTML = (res.status === 403 || res.status === 404)
+        ? '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+        : `จดไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+    box.value = '';
+    if ($('calTime')) $('calTime').value = '';
+    // เวลาที่เขียนผิดรูปแบบจะถูกปฏิเสธฝั่งสคริปต์ แล้วตอบกลับที่ issue ไม่ใช่ที่นี่
+    msg.textContent = 'จดแล้ว — จะขึ้นบนปฏิทินหลังระบบเก็บเข้าไฟล์ ราวครึ่งนาที';
+    setTimeout(loadCalendar, 30000);
+  } catch (e) {
+    msg.textContent = `จดไม่สำเร็จ — ${e.message}`;
   } finally {
     $('calAddGo').disabled = false;
   }
