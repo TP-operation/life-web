@@ -1418,28 +1418,39 @@ const NOISE = [/^Process completed with exit code/i, /^The process .* failed wit
 async function failReason(repo, runId) {
   const key = `${repo}#${runId}`;
   if (failCache.has(key)) return failCache.get(key);
-
   const token = getToken();
-  const jobs = await ghJson(
-    `https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs`,
-    token, 'application/vnd.github+json',
-  );
-  const job = (jobs.jobs ?? []).find((j) => j.conclusion === 'failure') ?? (jobs.jobs ?? [])[0];
-  const step = job ? (job.steps ?? []).find((x) => x.conclusion === 'failure')?.name ?? '' : '';
+
+  // ⚠️ สองคำขอนี้ใช้สิทธิ์คนละอัน ต้องล้มแยกกัน
+  //    jobs ใช้ Actions: read · annotations ใช้ Checks: read
+  //    ถ้าผูกไว้ด้วยกัน โทเคนที่ขาด Checks จะทำให้ไม่ได้แม้แต่ชื่อขั้นที่ล้ม
+  //    ทั้งที่ข้อมูลนั้นดึงได้ — เกิดขึ้นจริง 27 ส.ค. 2026 ตอน Ray ล้ม
+  let jobs = null;
+  let jobErr = null;
+  try {
+    jobs = await ghJson(`https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs`,
+      token, 'application/vnd.github+json');
+  } catch (e) { jobErr = e.status ?? e.message ?? String(e); }
+
+  const job = jobs ? ((jobs.jobs ?? []).find((j) => j.conclusion === 'failure') ?? (jobs.jobs ?? [])[0]) : null;
+  const step = job ? ((job.steps ?? []).find((x) => x.conclusion === 'failure')?.name ?? '') : '';
 
   let errors = [];
+  let annErr = null;
   if (job?.check_run_url) {
-    const ann = await ghJson(`${job.check_run_url}/annotations`, token, 'application/vnd.github+json');
-    errors = (Array.isArray(ann) ? ann : [])
-      .filter((a) => a.annotation_level === 'failure')
-      .map((a) => String(a.message ?? '').trim())
-      .filter((m) => m && !NOISE.some((re) => re.test(m)));
+    try {
+      const ann = await ghJson(`${job.check_run_url}/annotations`, token, 'application/vnd.github+json');
+      errors = (Array.isArray(ann) ? ann : [])
+        .filter((a) => a.annotation_level === 'failure')
+        .map((a) => String(a.message ?? '').trim())
+        .filter((m) => m && !NOISE.some((re) => re.test(m)));
+      // annotation เรียงจากใหม่ไปเก่า — คนอ่านตามลำดับที่มันเกิด
+      errors.reverse();
+    } catch (e) { annErr = e.status ?? e.message ?? String(e); }
   }
 
-  // annotation เรียงจากใหม่ไปเก่า — คนอ่านจากบนลงล่างตามลำดับที่มันเกิด
-  errors.reverse();
-  const out = { step, errors, url: job?.html_url ?? '' };
-  failCache.set(key, out);
+  const out = { step, errors, url: job?.html_url ?? '', jobErr, annErr };
+  // ผลที่ล้มเพราะสิทธิ์ ห้ามจำ — เผื่อเจ้าของไปเพิ่มสิทธิ์แล้วกดใหม่
+  if (!jobErr && !annErr) failCache.set(key, out);
   return out;
 }
 
@@ -1452,17 +1463,27 @@ function wireWhy(root) {
       b.disabled = true;
       b.textContent = 'กำลังถาม…';
       try {
-        const { step, errors, url } = await failReason(b.dataset.repo, b.dataset.run);
+        const { step, errors, url, jobErr, annErr } = await failReason(b.dataset.repo, b.dataset.run);
         const parts = [];
         if (step) parts.push(`<span class="stp">ล้มที่ขั้น <b>${esc(step)}</b></span>`);
+
         if (errors.length) {
           for (const m of errors) parts.push(`<span class="err">${esc(m)}</span>`);
+        } else if (annErr) {
+          // บอกให้ชัดว่าขาดสิทธิ์อะไร ไม่ใช่โยนเลขรหัสใส่หน้า
+          parts.push(`<span class="err">อ่านข้อความบอกสาเหตุไม่ได้ (${esc(String(annErr))})${
+            String(annErr) === '403' ? ' — โทเคนต้องมีสิทธิ์ Checks: Read ด้วย' : ''}</span>`);
+        } else if (jobErr) {
+          parts.push(`<span class="err">อ่านรายการขั้นไม่ได้ (${esc(String(jobErr))})${
+            String(jobErr) === '403' ? ' — โทเคนต้องมีสิทธิ์ Actions: Read' : ''}</span>`);
         } else {
-          parts.push('<span class="err">ไม่มีข้อความบอกสาเหตุใน log — ต้องเปิดดูเองที่บ้าน</span>');
+          parts.push('<span class="err">ขั้นนั้นล้มโดยไม่ได้เขียนบอกสาเหตุไว้ — ชื่อขั้นข้างบนคือเบาะแสที่มี</span>');
         }
+
         if (url) parts.push(`<a href="${esc(url)}" target="_blank" rel="noopener">เปิด log เต็ม</a>`);
         box.innerHTML = parts.join('');
-        b.remove();
+        // ยังขาดสิทธิ์อยู่ก็เก็บปุ่มไว้ให้กดซ้ำได้หลังไปแก้โทเคน
+        if (jobErr || annErr) { b.disabled = false; b.textContent = 'ลองอีกครั้ง'; } else { b.remove(); }
       } catch (e) {
         // ล้มตรงนี้ต้องบอกว่าล้มเพราะอะไร ไม่ใช่เงียบแล้วปุ่มค้าง
         box.innerHTML = `<span class="err">ถามไม่สำเร็จ — ${esc(String(e.status ?? e.message ?? e))}</span>`;
