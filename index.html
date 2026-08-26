@@ -91,6 +91,20 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  /* คำถามจาก agent — ต้องกดตอบได้ด้วยนิ้วเดียวตอนอยู่หน้างาน */
+  .qitem{padding:10px 0; border-top:1px solid var(--line)}
+  .qitem:first-child{border-top:0; padding-top:0}
+  .qh{display:block; font-size:.78rem; opacity:.7}
+  .qask{display:block; margin:3px 0 7px; font-weight:600; line-height:1.45}
+  .qa{display:block; width:100%; margin:5px 0; padding:11px 12px; text-align:left;
+      font:inherit; font-size:.86rem; line-height:1.4; cursor:pointer;
+      color:inherit; background:var(--card2, transparent); border:1px solid var(--line);
+      border-radius:9px; -webkit-appearance:none}
+  .qa:hover:not([disabled]){border-color:var(--accent)}
+  .qa[disabled], .qsend[disabled]{opacity:.5; cursor:default}
+  .qfree{flex:1; min-width:0}
+  .qmsg{display:block; margin-top:6px; font-size:.8rem; opacity:.85}
+
   /* ปุ่มถามว่าทำไมล้ม — ที่ทำงานเปิด github.com ไม่ได้ ต้องอ่านจบในหน้านี้ */
   .why{margin:4px 0 0; padding:5px 9px; font:inherit; font-size:.78rem; cursor:pointer;
        color:var(--crit); background:var(--crit-bg); border:1px solid var(--crit);
@@ -235,7 +249,7 @@
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
   <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
   <button data-tab="log">บันทึก</button>
-  <button data-tab="do">สั่งงาน</button>
+  <button data-tab="do">สั่งงาน<span class="n" id="tabDoN"></span></button>
 </nav>
 
 <!-- ตั้งค่า token — ไม่มี token ฝังในหน้านี้ ผู้ใช้กรอกเองเสมอ (INVARIANTS §5.2) -->
@@ -351,6 +365,15 @@
       </p>
     </div>
   </details>
+</section>
+
+<!-- คำถามจาก agent — ที่ทำงานเปิด github.com ไม่ได้ ต้องตอบจบในหน้านี้
+     ทำอย่างเดียวกับที่ Code.gs ทำตอนกดปุ่มใน LINE คือคอมเมนต์คำตอบ
+     แล้วสลับป้าย รอคำตอบ เป็น พร้อมแก้ เพื่อปลุก agent ให้ทำต่อ -->
+<section class="card hidden" id="questionsBox">
+  <label>คำถามที่รอคุณตอบ</label>
+  <div id="qList"></div>
+  <p class="muted" id="qNote" style="margin:8px 0 0"></p>
 </section>
 
 <!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
@@ -1401,6 +1424,135 @@ function agentCard(a, where) {
 }
 
 
+
+// ── คำถามจาก agent ────────────────────────────────────────
+//
+// agent ที่ติดเรื่องที่ตัดสินเองไม่ได้จะคอมเมนต์คำถามลง issue แล้วติดป้าย
+// รอคำตอบ แล้วจบรอบ (INVARIANTS §3.1 ห้ามค้าง job รอคำตอบ)
+//
+// ทางตอบเดิมมีสองทางและที่ทำงานใช้ไม่ได้ทั้งคู่
+//   ปุ่มใน LINE — มือถือเครื่องนั้นเอาเข้าที่ทำงานไม่ได้
+//   ติดป้ายเองบน github.com — log in บัญชี TP-operation ไม่ได้
+// ตรงนี้จึงเป็นทางที่สาม ทำอย่างเดียวกับที่ Code.gs ทำตอนรับ postback เป๊ะ ๆ
+//
+// ⚠️ ลำดับสำคัญ — คอมเมนต์คำตอบก่อน ค่อยสลับป้าย
+//    ป้าย พร้อมแก้ ปลุก agent ทันที ถ้าติดก่อน มันอาจอ่านตอนคำตอบยังไม่ขึ้น
+
+const LABEL_WAIT = 'รอคำตอบ';
+const LABEL_GO = 'พร้อมแก้';
+const Q_LETTERS = ['A', 'B', 'C', 'D'];
+
+/** ดึงคำถามกับตัวเลือกออกจากคอมเมนต์ที่ format-question.mjs เขียนไว้ */
+function parseQuestion(body) {
+  const src = String(body ?? '');
+  const opts = [];
+  for (const m of src.matchAll(/^- \*\*([A-D])\)\*\* (.+)$/gm)) {
+    opts.push({ letter: m[1], text: m[2].trim() });
+  }
+  // บรรทัดแรกที่ไม่ใช่หัวข้อและไม่ว่าง คือตัวคำถาม
+  const head = src.split('\n').map((l) => l.trim())
+    .find((l) => l && !l.startsWith('#') && !l.startsWith('-') && !l.startsWith('>'));
+  return { ask: head ?? '', options: opts };
+}
+
+async function loadQuestions() {
+  const token = getToken();
+  const list = $('qList');
+  const note = $('qNote');
+  const badge = $('tabDoN');
+  if (!token || !list) return;
+
+  try {
+    const issues = await ghJson(
+      `https://api.github.com/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(LABEL_WAIT)}&per_page=10`,
+      token, 'application/vnd.github+json',
+    );
+    const rows = [];
+    for (const it of (Array.isArray(issues) ? issues : [])) {
+      const cs = await ghJson(`${it.comments_url}?per_page=100`, token, 'application/vnd.github+json');
+      // เอาคอมเมนต์ล่าสุดที่มีตัวเลือก — agent อาจถามซ้ำในเรื่องเดิม
+      const withOpts = (Array.isArray(cs) ? cs : []).map((c) => parseQuestion(c.body)).filter((q) => q.options.length);
+      rows.push({ issue: it, q: withOpts[withOpts.length - 1] ?? parseQuestion(it.body) });
+    }
+    renderQuestions(rows);
+    if (badge) badge.textContent = rows.length ? String(rows.length) : '';
+    note.textContent = rows.length ? '' : 'ตอนนี้ไม่มีคำถามค้างอยู่';
+  } catch (e) {
+    const code = String(e.status ?? e.message ?? e);
+    note.innerHTML = code === '403' || code === '404'
+      ? '<strong>โทเคนนี้อ่าน issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+      : `อ่านคำถามไม่ได้ — ${esc(code)}`;
+  }
+}
+
+function renderQuestions(rows) {
+  $('qList').innerHTML = rows.map(({ issue, q }) => {
+    const btns = q.options.map((o) => `<button class="qa" type="button"
+        data-issue="${esc(String(issue.number))}"
+        data-say="${esc(o.letter + ') ' + o.text)}">${esc(o.letter)}) ${esc(o.text)}</button>`).join('');
+    return `<div class="qitem" data-q="${esc(String(issue.number))}">
+      <span class="qh">#${esc(String(issue.number))} ${esc(issue.title)}</span>
+      ${q.ask ? `<span class="qask">${esc(q.ask)}</span>` : ''}
+      ${btns}
+      <span class="row" style="margin-top:6px">
+        <input class="qfree" placeholder="หรือพิมพ์คำตอบเอง" data-issue="${esc(String(issue.number))}">
+        <button class="qsend" type="button" data-issue="${esc(String(issue.number))}">ส่ง</button>
+      </span>
+      <span class="qmsg"></span>
+    </div>`;
+  }).join('');
+  wireQuestions();
+}
+
+/** คอมเมนต์คำตอบแล้วสลับป้าย — เหมือนที่ Code.gs ทำตอนกดปุ่มใน LINE */
+async function sendAnswer(number, say) {
+  const token = getToken();
+  const head = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' };
+  const base = `https://api.github.com/repos/${REPO}/issues/${number}`;
+
+  const c = await fetch(`${base}/comments`, { method: 'POST', headers: head, body: JSON.stringify({ body: `ตอบจาก หน้าเว็บ: ${say}` }) });
+  if (!c.ok) throw new Error(String(c.status));
+
+  await fetch(`${base}/labels/${encodeURIComponent(LABEL_WAIT)}`, { method: 'DELETE', headers: head });
+  const l = await fetch(`${base}/labels`, { method: 'POST', headers: head, body: JSON.stringify({ labels: [LABEL_GO] }) });
+  if (!l.ok) throw new Error(String(l.status));
+}
+
+function wireQuestions() {
+  const run = async (el, number, say) => {
+    const item = el.closest('.qitem');
+    const msg = item?.querySelector('.qmsg');
+    if (!say.trim()) return;
+    for (const b of item.querySelectorAll('button')) b.disabled = true;
+    if (msg) msg.textContent = 'กำลังส่ง…';
+    try {
+      await sendAnswer(number, say.trim());
+      if (msg) msg.textContent = `ส่งแล้ว — ${say.trim()} · agent จะทำต่อเลย`;
+      item.querySelectorAll('.qa, .qfree, .qsend').forEach((x) => x.remove());
+      const badge = $('tabDoN');
+      const left = document.querySelectorAll('.qitem .qa').length ? document.querySelectorAll('.qitem').length : 0;
+      if (badge) badge.textContent = left > 1 ? String(left - 1) : '';
+    } catch (e) {
+      // ล้มแล้วต้องกดใหม่ได้ ไม่ใช่ค้างอยู่อย่างนั้น
+      const code = String(e.message ?? e);
+      if (msg) msg.innerHTML = code === '403' || code === '404'
+        ? '<strong>โทเคนนี้ตอบไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+        : `ส่งไม่สำเร็จ — ${esc(code)}`;
+      for (const b of item.querySelectorAll('button')) b.disabled = false;
+    }
+  };
+
+  for (const b of document.querySelectorAll('.qa')) {
+    b.onclick = () => run(b, b.dataset.issue, b.dataset.say);
+  }
+  for (const b of document.querySelectorAll('.qsend')) {
+    b.onclick = () => {
+      const inp = b.closest('.qitem')?.querySelector('.qfree');
+      run(b, b.dataset.issue, inp?.value ?? '');
+    };
+  }
+}
+
 // ── ทำไมรอบนั้นถึงล้ม ─────────────────────────────────────
 //
 // ที่ทำงานเปิด github.com ไม่ได้ ลิงก์ "ดู log" จึงเป็นทางตัน
@@ -1682,7 +1834,7 @@ const TABS = {
   projects: ['projects'],
   agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
-  do:       ['askBox', 'newTaskBox', 'dispatchBox', 'inboxBox'],
+  do:       ['questionsBox', 'askBox', 'newTaskBox', 'dispatchBox', 'inboxBox'],
 };
 const TAB_KEY = 'life_tab';
 
@@ -1720,6 +1872,7 @@ function showTab(name) {
     clearTimeout(agentsState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม
     agentsState.timer = null;
   }
+  if (tab === 'do') loadQuestions();
 }
 
 for (const b of document.querySelectorAll('nav.tabs button')) {
