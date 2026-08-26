@@ -91,19 +91,37 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
-  /* คำถามจาก agent — ต้องกดตอบได้ด้วยนิ้วเดียวตอนอยู่หน้างาน */
-  .qitem{padding:10px 0; border-top:1px solid var(--line)}
-  .qitem:first-child{border-top:0; padding-top:0}
-  .qh{display:block; font-size:.78rem; opacity:.7}
-  .qask{display:block; margin:3px 0 7px; font-weight:600; line-height:1.45}
-  .qa{display:block; width:100%; margin:5px 0; padding:11px 12px; text-align:left;
-      font:inherit; font-size:.86rem; line-height:1.4; cursor:pointer;
-      color:inherit; background:var(--card2, transparent); border:1px solid var(--line);
+  /* แชท — กล่องเดียวแทนห้าการ์ดเดิม หน้าตาต้องคุ้นเหมือนแอปแชทที่ใช้อยู่ */
+  .chatlog{max-height:52vh; overflow-y:auto; overscroll-behavior:contain;
+           display:flex; flex-direction:column; gap:9px; padding:2px 0 4px}
+  .chatlog:empty{display:none}
+  .msg{display:flex; flex-direction:column; max-width:88%}
+  .msg.me{align-self:flex-end; align-items:flex-end}
+  .msg.them{align-self:flex-start; align-items:flex-start}
+  .msg .bub{padding:9px 12px; border-radius:14px; line-height:1.5; font-size:.86rem;
+            white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; max-width:100%}
+  .msg.me .bub{background:var(--accent); color:#fff; border-bottom-right-radius:5px}
+  .msg.them .bub{background:var(--card2, rgba(127,127,127,.14)); border-bottom-left-radius:5px}
+  .msg.pend{opacity:.55}
+  .msg .tm{margin:2px 4px 0; font-size:.68rem; opacity:.6}
+  .msg .bub code{font-size:.92em}
+
+  /* ปุ่มตอบคำถามของ agent — อยู่ในฟองแชทเลย กดนิ้วเดียวตอนอยู่หน้างาน */
+  .qa{display:block; width:100%; margin:6px 0 0; padding:10px 12px; text-align:left;
+      font:inherit; font-size:.85rem; line-height:1.4; cursor:pointer;
+      color:inherit; background:var(--bg); border:1px solid var(--line);
       border-radius:9px; -webkit-appearance:none}
   .qa:hover:not([disabled]){border-color:var(--accent)}
   .qa[disabled], .qsend[disabled]{opacity:.5; cursor:default}
   .qfree{flex:1; min-width:0}
-  .qmsg{display:block; margin-top:6px; font-size:.8rem; opacity:.85}
+  .qmsg{display:block; margin-top:6px; font-size:.78rem; opacity:.9}
+
+  /* คำขึ้นต้นที่ใช้บ่อย — แตะแล้วเติมให้ ไม่ต้องจำว่าพิมพ์อะไรได้บ้าง */
+  .chips{display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 6px}
+  .chips button{padding:6px 11px; font:inherit; font-size:.78rem; cursor:pointer;
+                color:inherit; background:transparent; border:1px solid var(--line);
+                border-radius:999px; -webkit-appearance:none}
+  .chips button:hover{border-color:var(--accent)}
 
   /* ปุ่มถามว่าทำไมล้ม — ที่ทำงานเปิด github.com ไม่ได้ ต้องอ่านจบในหน้านี้ */
   .why{margin:4px 0 0; padding:5px 9px; font:inherit; font-size:.78rem; cursor:pointer;
@@ -308,92 +326,29 @@
   </div>
 </section>
 
-<!-- ถามความรู้ — ทางเดียวที่ถาม AI ได้จากคอมที่ทำงาน -->
-<section class="card hidden" id="askBox">
-  <label for="askInput">ถามเรื่องหลักการ</label>
-  <textarea id="askInput" rows="3" placeholder="เช่น content uniformity กับ blend uniformity ต่างกันยังไง"></textarea>
-  <button class="primary" id="askSend" style="margin-top:8px">ถาม</button>
-  <p class="muted" id="askNote" style="margin:8px 0 0">
-    ใช้เวลาราว 1 นาที · คำตอบจะถูกเก็บเป็นโน้ตใน <code>30-knowledge/</code> พร้อมลิงก์ไปเรื่องที่เคยถาม
-  </p>
-  <div id="askAnswer"></div>
-</section>
+<!-- แชท — กล่องเดียวสำหรับทุกอย่าง เหมือนคุยใน LINE
+     ก่อนหน้านี้แท็บนี้มีห้าการ์ด ถามความรู้ · เพิ่มงาน · คำถามค้าง · สั่งงาน · โยนเข้ากล่อง
+     ทั้งห้าเปิด issue เหมือนกันหมด ต่างแค่คำขึ้นต้นของหัวข้อ การให้คนเลือกกล่องเอง
+     คือการให้คนทำงานของ router ทั้งที่ระบบมี router อยู่แล้ว
 
-<!-- เพิ่มงาน — สำหรับของที่รู้ชัดแล้วว่าเป็นงาน ใช้เวลาเท่าไร ส่งเมื่อไหร่
-     พับไว้เพราะใช้น้อยกว่ากล่อง inbox และไม่ควรมาบังของที่ใช้บ่อยกว่า -->
-<section class="card hidden" id="newTaskBox">
-  <details>
-    <summary style="font-weight:600; cursor:pointer">เพิ่มงานใหม่</summary>
-    <div style="margin-top:10px">
-      <label for="ntTitle">ชื่องาน</label>
-      <input id="ntTitle" type="text" placeholder="สั้น ๆ พอให้รู้ว่าคืออะไร">
+     พิมพ์เฉย ๆ เข้ากล่อง แล้ว Iris คัดแยกเป็น task ให้ทันที
+     คำขึ้นต้นที่ระบบรู้จักจะข้าม Iris ไปที่ปลายทางตรง ๆ
 
-      <div class="row" style="margin-top:8px">
-        <div style="flex:1 1 120px">
-          <label for="ntContext">ทำที่ไหน</label>
-          <select id="ntContext" style="width:100%; min-height:46px; font:inherit; padding:11px;
-                  border-radius:9px; border:1px solid var(--line); background:var(--bg); color:var(--fg)">
-            <option value="work">งานโรงงาน</option>
-            <option value="project">โปรเจค</option>
-            <option value="life">ชีวิต</option>
-          </select>
-        </div>
-        <div style="flex:1 1 90px">
-          <label for="ntEst">กี่ชั่วโมง</label>
-          <input id="ntEst" type="number" min="0.5" step="0.5" value="1" inputmode="decimal">
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:8px">
-        <div style="flex:1 1 140px">
-          <label for="ntDeadline">กำหนดส่ง</label>
-          <input id="ntDeadline" type="date">
-        </div>
-        <div style="flex:1 1 120px">
-          <label for="ntEnergy">ต้องใช้สมองแค่ไหน</label>
-          <select id="ntEnergy" style="width:100%; min-height:46px; font:inherit; padding:11px;
-                  border-radius:9px; border:1px solid var(--line); background:var(--bg); color:var(--fg)">
-            <option value="high">คิดหนัก</option>
-            <option value="low">ทำได้ตอนเหนื่อย</option>
-          </select>
-        </div>
-      </div>
-
-      <button class="primary" id="ntSend" style="margin-top:12px">สร้างงาน</button>
-      <p class="muted" id="ntNote" style="margin:8px 0 0">
-        ชั่วโมงที่กรอกคือตัวที่ระบบใช้จัดลำดับ — ประเมินตามจริงดีกว่าประเมินให้สวย
-      </p>
-    </div>
-  </details>
-</section>
-
-<!-- คำถามจาก agent — ที่ทำงานเปิด github.com ไม่ได้ ต้องตอบจบในหน้านี้
-     ทำอย่างเดียวกับที่ Code.gs ทำตอนกดปุ่มใน LINE คือคอมเมนต์คำตอบ
-     แล้วสลับป้าย รอคำตอบ เป็น พร้อมแก้ เพื่อปลุก agent ให้ทำต่อ -->
-<section class="card hidden" id="questionsBox">
-  <label>คำถามที่รอคุณตอบ</label>
-  <div id="qList"></div>
-  <p class="muted" id="qNote" style="margin:8px 0 0"></p>
-</section>
-
-<!-- โยนเข้ากล่อง — ใช้ระหว่างวันตอนที่ไม่มีเวลาจัดโครง จึงต้องเร็วที่สุด -->
-<section class="card hidden" id="dispatchBox">
-  <label for="dispatch">สั่งงานโปรเจค</label>
-  <textarea id="dispatch" rows="3" placeholder="สั่งเป็นภาษาคน — ระบบหาเองว่าเป็นงานของโปรเจคไหน"></textarea>
-  <div class="row" style="margin-top:8px"><button class="primary" id="sendDispatch">ส่งต่อ</button></div>
-  <p class="muted" id="dispatchNote" style="margin:8px 0 0">
-    ไปเปิด issue ให้ที่โปรเจคปลายทาง แล้ว agent ของโปรเจคนั้นรับช่วงต่อ ·
-    <strong>ยังไม่รองรับ store/plan/ops/intake</strong> — สั่งตรงที่ repo นั้น
-  </p>
-</section>
-
-<section class="card hidden" id="inboxBox">
-  <label for="inbox">โยนเข้ากล่อง</label>
-  <textarea id="inbox" rows="3" placeholder="นึกอะไรออก พิมพ์ทิ้งไว้ก่อน ไม่ต้องจัดโครง"></textarea>
-  <button class="primary" id="send" style="margin-top:8px">ส่งเข้ากล่อง</button>
-  <p class="muted" id="inboxNote" style="margin:8px 0 0">
-    เก็บเข้า <code>10-inbox/</code> ภายในไม่กี่วินาที · เลข lot ใส่ได้ · ผลตรวจกับสูตรอย่าใส่
-  </p>
+     ⚠️ กติกาต้องตรงกับ LINE เป๊ะ ๆ ทั้งสองทางเปิด issue ใบเดียวกันแบบเดียวกัน
+        ถ้าสองที่คัดแยกคนละแบบ เจ้าของจะต้องจำสองชุด -->
+<section class="card hidden" id="chatBox">
+  <div id="chatLog" class="chatlog"></div>
+  <p class="muted" id="chatNote" style="margin:6px 0 0"></p>
+  <div class="chips" id="chatChips">
+    <button type="button" data-p="สั่ง ">สั่งงาน</button>
+    <button type="button" data-p="ถาม ">ถามความรู้</button>
+    <button type="button" data-p="ปิดงาน ">ปิดงาน</button>
+    <button type="button" data-p="โอที ">โอที</button>
+  </div>
+  <textarea id="chatInput" rows="2" placeholder="พิมพ์อะไรก็ได้ — Iris จัดให้เป็นงานเอง"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button class="primary" id="chatSend" style="flex:1">ส่ง</button>
+  </div>
 </section>
 
 <section id="tasks"></section>
@@ -469,7 +424,6 @@ async function load() {
   render(data);
   loadWeek(token);
   loadProjects(token);
-  resumeAsk(token);
 }
 
 // สรุปสัปดาห์เป็นของเสริม — ถ้ายังไม่มีไฟล์ก็ไม่ต้องรบกวนหน้าจอ
@@ -705,164 +659,23 @@ function render(d) {
   $('plan').classList.remove('hidden');
   $('otBox').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
-  $('askBox').classList.remove('hidden');
-  $('newTaskBox').classList.remove('hidden');
-  $('dispatchBox').classList.remove('hidden');
-  $('inboxBox').classList.remove('hidden');
-  if (!$('ntDeadline').value) {
-    const d = new Date(Date.now() + 7 * 86400000);
-    $('ntDeadline').value = d.toISOString().slice(0, 10);
-  }
+  $('chatBox').classList.remove('hidden');
   renderDrafts(d.drafts ?? []);
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
 
-// ── ถามความรู้ ─────────────────────────────────────────────
-// เปิด issue แล้วรอ agent ตอบเป็นคอมเมนต์ · ไม่มีเซิร์ฟเวอร์จึงต้อง poll เอา
-// ~1 นาทีเพราะ Actions ต้องบูตเครื่องและติดตั้ง Claude Code ก่อนถึงจะเริ่มคิด
-const ASK_POLL_MS = 10000;
-const ASK_TIMEOUT_MS = 240000;
-// คำถามที่ยังรอคำตอบอยู่ใน localStorage ไม่ใช่ในตัวแปร
-// หนึ่งนาทีนานพอที่จะสลับไปทำอย่างอื่นหรือปิดแท็บ — พอกลับมาต้องได้คำตอบเหมือนเดิม
-const ASK_KEY = 'life_pending_ask';
 
 // ต้องหนี `"` ด้วย เพราะมันถูกใช้ใน data-task="..." ของปุ่มงาน draft
 // ชื่องานที่มีเครื่องหมายคำพูดจะทำให้ attribute ขาดกลางคัน
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (m) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[m]));
 
-function showAnswer(comments, issueNumber) {
-  $('askNote').innerHTML = `ตอบเมื่อสักครู่ · เก็บเป็นโน้ตใน <code>30-knowledge/</code> แล้ว ·
-    <a href="https://github.com/${REPO}/issues/${issueNumber}" target="_blank" rel="noopener">ดูใน issue</a>`;
-  $('askAnswer').innerHTML = `<div class="task" style="margin-top:10px; white-space:pre-wrap">${
-    esc(comments.map((c) => c.body).join('\n\n———\n\n'))
-  }</div>`;
-}
 
-async function pollAnswer(issueNumber, token, startedAt = Date.now()) {
-  if (Date.now() - startedAt > ASK_TIMEOUT_MS) {
-    localStorage.removeItem(ASK_KEY);
-    $('askNote').innerHTML = `ยังไม่ได้คำตอบใน 4 นาที — ดูที่ <a href="https://github.com/${REPO}/issues/${issueNumber}" target="_blank" rel="noopener">issue #${issueNumber}</a> โดยตรง`;
-    return;
-  }
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      cache: 'no-store',
-    });
-    if (res.ok) {
-      const comments = await res.json();
-      if (comments.length) {
-        localStorage.removeItem(ASK_KEY);
-        showAnswer(comments, issueNumber);
-        return;
-      }
-    }
-  } catch { /* เน็ตสะดุดระหว่าง poll — ลองใหม่รอบหน้า */ }
-  setTimeout(() => pollAnswer(issueNumber, token, startedAt), ASK_POLL_MS);
-}
 
 /** เปิดหน้ามาแล้วมีคำถามค้างอยู่ — ตามต่อให้เลย */
-function resumeAsk(token) {
-  const raw = localStorage.getItem(ASK_KEY);
-  if (!raw) return;
-  let pending;
-  try { pending = JSON.parse(raw); } catch { localStorage.removeItem(ASK_KEY); return; }
-  if (!pending?.issue) { localStorage.removeItem(ASK_KEY); return; }
 
-  $('askNote').textContent = `กำลังตามคำตอบของคำถามที่ถามค้างไว้ (issue #${pending.issue})…`;
-  // startedAt เดิม เพื่อให้หมดเวลาเมื่อครบ 4 นาทีนับจากตอนถามจริง ไม่ใช่ตอนเปิดหน้า
-  pollAnswer(pending.issue, token, pending.at ?? Date.now());
-}
-
-$('askSend').onclick = async () => {
-  const q = $('askInput').value.trim();
-  if (!q) return;
-  const token = getToken();
-  if (!token) return;
-
-  const btn = $('askSend');
-  btn.disabled = true;
-  btn.textContent = 'กำลังส่ง…';
-  $('askAnswer').innerHTML = '';
-
-  const lines = q.split('\n');
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        title: `ถาม ${lines[0].slice(0, 80)}`,
-        body: lines.slice(1).join('\n').trim(),
-      }),
-    });
-    if (!res.ok) {
-      $('askNote').textContent = res.status === 403 || res.status === 404
-        ? 'โทเคนนี้เปิด issue ไม่ได้ — ต้องมีสิทธิ์ Issues: Read and write'
-        : `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
-      return;
-    }
-    const issue = await res.json();
-    $('askInput').value = '';
-    localStorage.setItem(ASK_KEY, JSON.stringify({ issue: issue.number, at: Date.now() }));
-    $('askNote').textContent = `กำลังคิด… (issue #${issue.number}) ปกติราว 1 นาที · ปิดแท็บได้ กลับมาแล้วคำตอบยังอยู่`;
-    pollAnswer(issue.number, token);
-  } catch (e) {
-    $('askNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'ถาม';
-  }
-};
 
 // ── เพิ่มงานใหม่ ───────────────────────────────────────────
 // ค่า est มาจากเจ้าของโดยตรง ไม่ใช่การเดา — urgency ทั้งระบบยืนอยู่บนตัวนี้
-$('ntSend').onclick = async () => {
-  const title = $('ntTitle').value.trim();
-  if (!title) { $('ntNote').textContent = 'ยังไม่ได้ใส่ชื่องาน'; return; }
-  const token = getToken();
-  if (!token) return;
-
-  const body = [
-    `context: ${$('ntContext').value}`,
-    `est: ${$('ntEst').value}`,
-    `deadline: ${$('ntDeadline').value}`,
-    `energy: ${$('ntEnergy').value}`,
-  ].join('\n');
-
-  const btn = $('ntSend');
-  btn.disabled = true;
-  btn.textContent = 'กำลังสร้าง…';
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title: `เพิ่มงาน ${title}`, body }),
-    });
-    if (!res.ok) {
-      $('ntNote').textContent = res.status === 403 || res.status === 404
-        ? 'โทเคนนี้เปิด issue ไม่ได้ — ต้องมีสิทธิ์ Issues: Read and write'
-        : `สร้างไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
-      return;
-    }
-    const issue = await res.json();
-    $('ntTitle').value = '';
-    // ถ้าค่าที่กรอกไม่ผ่านการตรวจฝั่ง repo issue จะไม่ถูกปิดและมีคอมเมนต์บอกเหตุผล
-    $('ntNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กด <b>รีเฟรช</b> อีกครั้งในสักครู่เพื่อดูงานใหม่`;
-  } catch (e) {
-    $('ntNote').textContent = `สร้างไม่สำเร็จ — ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'สร้างงาน';
-  }
-};
 
 // ── ปิดงาน ─────────────────────────────────────────────────
 // เปิด issue "ปิดงาน <ชื่อ>" แทนการแก้ไฟล์ตรง ๆ ด้วยเหตุผลเดียวกับกล่อง inbox:
@@ -1455,56 +1268,122 @@ function parseQuestion(body) {
   return { ask: head ?? '', options: opts };
 }
 
-async function loadQuestions() {
+// คำขึ้นต้นที่ระบบรู้จัก — **ต้องตรงกับ ROUTES ใน apps-script/Code.gs**
+// ทั้งสองทางเปิด issue ใบเดียวกันแบบเดียวกัน ถ้าคัดแยกคนละแบบ เจ้าของต้องจำสองชุด
+const CHAT_ROUTES = [
+  { p: 'ออกกำลังกาย', say: 'บันทึกออกกำลังกายให้แล้ว' },
+  { p: 'ปิดงาน', say: 'ปิดงานให้แล้ว' },
+  { p: 'เพิ่มงาน', say: 'เพิ่มงานให้แล้ว' },
+  { p: 'โอที', say: 'บันทึก OT ให้แล้ว' },
+  { p: 'ยืนยันงาน', say: 'ยืนยันงานให้แล้ว' },
+  { p: 'ทิ้งงาน', say: 'ทิ้งงานให้แล้ว' },
+  { p: 'ถาม', say: 'ส่งคำถามให้ agent แล้ว เดี๋ยวตอบกลับมา' },
+  { p: 'สั่ง', say: 'กำลังหาว่าเป็นงานของโปรเจคไหน' },
+];
+const CHAT_FALLBACK = 'จดเข้ากล่องแล้ว เดี๋ยว Iris จัดให้เป็นงานเอง';
+const CHAT_MARK = 'ส่งมาจากหน้าเว็บ';
+const CHAT_TICK_LIVE = 15000;   // เพิ่งส่งอะไรไป กำลังรอคำตอบ
+const CHAT_TICK_IDLE = 60000;
+const CHAT_LIVE_FOR = 300000;   // นับว่ายังรออยู่ห้านาทีหลังส่ง
+
+const chatState = { timer: null, loaded: false, sentAt: 0, pending: [] };
+
+function sayForChat(text) {
+  const t = String(text ?? '').trim();
+  const hit = CHAT_ROUTES.find((r) => t.indexOf(r.p) === 0);
+  return hit ? hit.say : CHAT_FALLBACK;
+}
+
+/** ตัดหมายเหตุที่เราต่อท้ายเองออก คนพิมพ์ไม่ได้พิมพ์บรรทัดนี้ */
+function stripMark(body) {
+  return String(body ?? '').split('\n\n---\n')[0].trim();
+}
+
+async function loadChat() {
   const token = getToken();
-  const list = $('qList');
-  const note = $('qNote');
-  const badge = $('tabDoN');
-  if (!token || !list) return;
+  const log = $('chatLog');
+  if (!token || !log) return;
+  clearTimeout(chatState.timer);
 
   try {
-    const issues = await ghJson(
-      `https://api.github.com/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(LABEL_WAIT)}&per_page=10`,
-      token, 'application/vnd.github+json',
-    );
-    const rows = [];
-    for (const it of (Array.isArray(issues) ? issues : [])) {
-      const cs = await ghJson(`${it.comments_url}?per_page=100`, token, 'application/vnd.github+json');
-      // เอาคอมเมนต์ล่าสุดที่มีตัวเลือก — agent อาจถามซ้ำในเรื่องเดิม
-      const withOpts = (Array.isArray(cs) ? cs : []).map((c) => parseQuestion(c.body)).filter((q) => q.options.length);
-      rows.push({ issue: it, q: withOpts[withOpts.length - 1] ?? parseQuestion(it.body) });
+    // สองคำขอต่อรอบเท่านั้น — รายการคอมเมนต์ระดับ repo ทำให้ไม่ต้องถามทีละ issue
+    const [issues, comments] = await Promise.all([
+      ghJson(`https://api.github.com/repos/${REPO}/issues?state=all&per_page=20&sort=created&direction=desc`,
+        token, 'application/vnd.github+json'),
+      ghJson(`https://api.github.com/repos/${REPO}/issues/comments?per_page=60&sort=created&direction=desc`,
+        token, 'application/vnd.github+json'),
+    ]);
+
+    const mine = (Array.isArray(issues) ? issues : []).filter((it) => !it.pull_request);
+    const nums = new Set(mine.map((it) => it.number));
+    const waiting = new Set(mine
+      .filter((it) => (it.labels ?? []).some((l) => (l.name ?? l) === LABEL_WAIT))
+      .map((it) => it.number));
+
+    const ev = [];
+    for (const it of mine) {
+      ev.push({
+        at: it.created_at, me: true, num: it.number,
+        text: [it.title, stripMark(it.body)].filter(Boolean).join('\n'),
+      });
     }
-    renderQuestions(rows);
-    if (badge) badge.textContent = rows.length ? String(rows.length) : '';
-    note.textContent = rows.length ? '' : 'ตอนนี้ไม่มีคำถามค้างอยู่';
+    for (const c of (Array.isArray(comments) ? comments : [])) {
+      const num = Number(String(c.issue_url ?? '').split('/').pop());
+      if (!nums.has(num)) continue;
+      ev.push({
+        at: c.created_at, me: false, num, text: String(c.body ?? ''),
+        q: waiting.has(num) ? parseQuestion(c.body) : null,
+      });
+    }
+    ev.sort((a, b) => new Date(a.at) - new Date(b.at));
+
+    renderChat(ev.slice(-40));
+    chatState.loaded = true;
+    $('chatNote').textContent = '';
+    const badge = $('tabDoN');
+    if (badge) badge.textContent = waiting.size ? String(waiting.size) : '';
   } catch (e) {
     const code = String(e.status ?? e.message ?? e);
-    note.innerHTML = code === '403' || code === '404'
+    $('chatNote').innerHTML = (code === '403' || code === '404')
       ? '<strong>โทเคนนี้อ่าน issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
-      : `อ่านคำถามไม่ได้ — ${esc(code)}`;
+      : `อ่านแชทไม่ได้ — ${esc(code)}`;
   }
+
+  // เร่งจังหวะเฉพาะตอนเพิ่งส่งอะไรไปแล้วกำลังรอคำตอบ ไม่ใช่ถี่ตลอดเวลา
+  const live = Date.now() - chatState.sentAt < CHAT_LIVE_FOR;
+  chatState.timer = setTimeout(loadChat, live ? CHAT_TICK_LIVE : CHAT_TICK_IDLE);
 }
 
-function renderQuestions(rows) {
-  $('qList').innerHTML = rows.map(({ issue, q }) => {
-    const btns = q.options.map((o) => `<button class="qa" type="button"
-        data-issue="${esc(String(issue.number))}"
-        data-say="${esc(o.letter + ') ' + o.text)}">${esc(o.letter)}) ${esc(o.text)}</button>`).join('');
-    return `<div class="qitem" data-q="${esc(String(issue.number))}">
-      <span class="qh">#${esc(String(issue.number))} ${esc(issue.title)}</span>
-      ${q.ask ? `<span class="qask">${esc(q.ask)}</span>` : ''}
-      ${btns}
-      <span class="row" style="margin-top:6px">
-        <input class="qfree" placeholder="หรือพิมพ์คำตอบเอง" data-issue="${esc(String(issue.number))}">
-        <button class="qsend" type="button" data-issue="${esc(String(issue.number))}">ส่ง</button>
-      </span>
-      <span class="qmsg"></span>
-    </div>`;
+function renderChat(ev) {
+  const log = $('chatLog');
+  // จำไว้เพื่อวาดซ้ำได้ทันทีตอนกดส่ง ไม่ต้องรอ loadChat กลับมาก่อน
+  // ไม่งั้นประวัติทั้งหมดจะหายวูบหนึ่งจังหวะแล้วค่อยกลับมา
+  chatState.ev = ev;
+  // เลื่อนตามให้เฉพาะตอนที่คนอ่านอยู่ล่างสุด ไม่งั้นจะกระชากตอนกำลังอ่านของเก่า
+  const near = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  const body = ev.map((e) => {
+    const opts = e.q?.options?.length
+      ? e.q.options.map((o) => `<button class="qa" type="button" data-issue="${esc(String(e.num))}"
+          data-say="${esc(o.letter + ') ' + o.text)}">${esc(o.letter)}) ${esc(o.text)}</button>`).join('')
+        + `<span class="row" style="margin-top:6px">
+             <input class="qfree" placeholder="หรือพิมพ์คำตอบเอง">
+             <button class="qsend" type="button" data-issue="${esc(String(e.num))}">ส่ง</button>
+           </span>`
+      : '';
+    return `<div class="msg ${e.me ? 'me' : 'them'}">
+        <span class="bub">${mdLite(e.text)}${opts}<span class="qmsg"></span></span>
+        <span class="tm">#${esc(String(e.num))} · ${esc(fmtAgo(e.at))}</span>
+      </div>`;
   }).join('');
+  const pend = chatState.pending.map((t) =>
+    `<div class="msg me pend"><span class="bub">${mdLite(t)}</span><span class="tm">กำลังส่ง…</span></div>`).join('');
+  log.innerHTML = body + pend;
   wireQuestions();
+  if (near) log.scrollTop = log.scrollHeight;
 }
 
-/** คอมเมนต์คำตอบแล้วสลับป้าย — เหมือนที่ Code.gs ทำตอนกดปุ่มใน LINE */
+/** คอมเมนต์คำตอบแล้วสลับป้าย — เหมือนที่ Code.gs ทำตอนกดปุ่มใน LINE
+    ลำดับสำคัญ คอมเมนต์ก่อน ค่อยติดป้าย เพราะป้ายพร้อมแก้ปลุก agent ทันที */
 async function sendAnswer(number, say) {
   const token = getToken();
   const head = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' };
@@ -1520,36 +1399,76 @@ async function sendAnswer(number, say) {
 
 function wireQuestions() {
   const run = async (el, number, say) => {
-    const item = el.closest('.qitem');
+    const item = el.closest('.msg');
     const msg = item?.querySelector('.qmsg');
     if (!say.trim()) return;
     for (const b of item.querySelectorAll('button')) b.disabled = true;
     if (msg) msg.textContent = 'กำลังส่ง…';
     try {
       await sendAnswer(number, say.trim());
-      if (msg) msg.textContent = `ส่งแล้ว — ${say.trim()} · agent จะทำต่อเลย`;
-      item.querySelectorAll('.qa, .qfree, .qsend').forEach((x) => x.remove());
-      const badge = $('tabDoN');
-      const left = document.querySelectorAll('.qitem .qa').length ? document.querySelectorAll('.qitem').length : 0;
-      if (badge) badge.textContent = left > 1 ? String(left - 1) : '';
+      chatState.sentAt = Date.now();
+      loadChat();
     } catch (e) {
-      // ล้มแล้วต้องกดใหม่ได้ ไม่ใช่ค้างอยู่อย่างนั้น
       const code = String(e.message ?? e);
-      if (msg) msg.innerHTML = code === '403' || code === '404'
-        ? '<strong>โทเคนนี้ตอบไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
-        : `ส่งไม่สำเร็จ — ${esc(code)}`;
+      if (msg) {
+        msg.innerHTML = (code === '403' || code === '404')
+          ? '<strong>โทเคนนี้ตอบไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+          : `ส่งไม่สำเร็จ — ${esc(code)}`;
+      }
       for (const b of item.querySelectorAll('button')) b.disabled = false;
     }
   };
-
-  for (const b of document.querySelectorAll('.qa')) {
-    b.onclick = () => run(b, b.dataset.issue, b.dataset.say);
-  }
+  for (const b of document.querySelectorAll('.qa')) b.onclick = () => run(b, b.dataset.issue, b.dataset.say);
   for (const b of document.querySelectorAll('.qsend')) {
-    b.onclick = () => {
-      const inp = b.closest('.qitem')?.querySelector('.qfree');
-      run(b, b.dataset.issue, inp?.value ?? '');
-    };
+    b.onclick = () => run(b, b.dataset.issue, b.closest('.msg')?.querySelector('.qfree')?.value ?? '');
+  }
+}
+
+/** ส่งข้อความ — เปิด issue ใบเดียวเหมือนที่ LINE ทำ แล้วให้ workflow คัดแยกเอง */
+async function sendChat() {
+  const box = $('chatInput');
+  const text = box.value.trim();
+  if (!text) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('chatSend');
+  btn.disabled = true;
+  box.value = '';
+  chatState.pending.push(text);
+  renderChat(chatState.ev ?? []);
+
+  const lines = text.split('\n');
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title: lines[0].slice(0, 80),
+        body: `${lines.slice(1).join('\n')}\n\n---\n${CHAT_MARK}`.trim(),
+      }),
+    });
+    chatState.pending = chatState.pending.filter((t) => t !== text);
+    if (!res.ok) {
+      $('chatNote').innerHTML = (res.status === 403 || res.status === 404)
+        ? '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+        : `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      box.value = text;   // ข้อความที่พิมพ์แล้วห้ามหายเพราะส่งไม่ผ่าน
+      return;
+    }
+    chatState.sentAt = Date.now();
+    $('chatNote').textContent = sayForChat(text);
+    await loadChat();
+  } catch (e) {
+    chatState.pending = chatState.pending.filter((t) => t !== text);
+    $('chatNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
+    box.value = text;
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -1834,7 +1753,7 @@ const TABS = {
   projects: ['projects'],
   agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
-  do:       ['questionsBox', 'askBox', 'newTaskBox', 'dispatchBox', 'inboxBox'],
+  do:       ['chatBox'],
 };
 const TAB_KEY = 'life_tab';
 
@@ -1859,7 +1778,28 @@ function showTab(name) {
       if (el) el.style.display = key === tab ? '' : 'none';
     }
   }
-  for (const b of document.querySelectorAll('nav.tabs button')) {
+  $('chatSend').onclick = sendChat;
+
+// Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ — เหมือนแอปแชททั่วไป
+// แต่บนมือถือปล่อยให้ Enter ขึ้นบรรทัดใหม่ตามปกติ เพราะไม่มีปุ่ม Shift ให้กด
+$('chatInput').onkeydown = (e) => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  if (matchMedia('(pointer: coarse)').matches) return;
+  e.preventDefault();
+  sendChat();
+};
+
+for (const c of document.querySelectorAll('#chatChips button')) {
+  c.onclick = () => {
+    const box = $('chatInput');
+    const rest = box.value.replace(/^(สั่ง|ถาม|ปิดงาน|โอที|ออกกำลังกาย|เพิ่มงาน|ยืนยันงาน|ทิ้งงาน)\s*/, '');
+    box.value = c.dataset.p + rest;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  };
+}
+
+for (const b of document.querySelectorAll('nav.tabs button')) {
     b.classList.toggle('on', b.dataset.tab === tab);
   }
   localStorage.setItem(TAB_KEY, tab);
@@ -1872,7 +1812,12 @@ function showTab(name) {
     clearTimeout(agentsState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม
     agentsState.timer = null;
   }
-  if (tab === 'do') loadQuestions();
+  if (tab === 'do') {
+    loadChat();
+  } else {
+    clearTimeout(chatState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม เหมือนแท็บ agent
+    chatState.timer = null;
+  }
 }
 
 for (const b of document.querySelectorAll('nav.tabs button')) {
@@ -1893,97 +1838,10 @@ addEventListener('resize', syncHeadHeight);
 //
 // ไม่ poll รอคำตอบแบบกล่องถาม AI เพราะการส่งต่อจบใน ~1 นาทีและผลไปโผล่ที่ repo ปลายทาง
 // ไม่ใช่ที่หน้านี้ — การนั่งรอตรงนี้จึงไม่ได้อะไรกลับมา
-$('sendDispatch').onclick = async () => {
-  const text = $('dispatch').value.trim();
-  if (!text) return;
-  const token = getToken();
-  if (!token) return;
-
-  const btn = $('sendDispatch');
-  btn.disabled = true;
-  btn.textContent = 'กำลังส่ง…';
-  const lines = text.split('\n');
-  // หัวข้อต้องขึ้นต้นด้วย "สั่ง " ไม่งั้น dispatch.yml จะไม่ตื่น
-  const title = `สั่ง ${lines[0].slice(0, 80)}`;
-  const body = lines.slice(1).join('\n').trim();
-
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title, body }),
-    });
-
-    if (res.status === 403 || res.status === 404) {
-      $('dispatchNote').innerHTML = '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องเพิ่มสิทธิ์ Issues: Read and write ในหน้า fine-grained token';
-      return;
-    }
-    if (!res.ok) {
-      $('dispatchNote').textContent = `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
-      return;
-    }
-
-    const issue = await res.json();
-    $('dispatch').value = '';
-    $('dispatchNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กำลังหาว่าเป็นงานของโปรเจคไหน · <a href="https://github.com/${REPO}/issues/${issue.number}" target="_blank" rel="noopener">ดูผล</a>`;
-  } catch (e) {
-    $('dispatchNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'ส่งต่อ';
-  }
-};
 
 // ── โยนเข้ากล่อง ───────────────────────────────────────────
 // เปิด issue แทนการเขียนไฟล์ตรง ๆ — โทเคนบนเครื่องที่ทำงานจึงแตะเนื้อ repo ไม่ได้เลย
 // workflow inbox-collect เป็นคนย้ายเข้า 10-inbox/ แล้วปิด issue ให้
-$('send').onclick = async () => {
-  const text = $('inbox').value.trim();
-  if (!text) return;
-  const token = getToken();
-  if (!token) return;
-
-  const btn = $('send');
-  btn.disabled = true;
-  btn.textContent = 'กำลังส่ง…';
-  const lines = text.split('\n');
-  const title = lines[0].slice(0, 80);
-  const body = lines.slice(1).join('\n').trim();
-
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title, body }),
-    });
-
-    if (res.status === 403 || res.status === 404) {
-      $('inboxNote').innerHTML = '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องเพิ่มสิทธิ์ Issues: Read and write ในหน้า fine-grained token';
-      return;
-    }
-    if (!res.ok) {
-      $('inboxNote').textContent = `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
-      return;
-    }
-
-    const issue = await res.json();
-    $('inbox').value = '';
-    $('inboxNote').innerHTML = `ส่งแล้ว (issue #${issue.number}) · กำลังเก็บเข้ากล่อง`;
-  } catch (e) {
-    $('inboxNote').textContent = `ส่งไม่สำเร็จ — ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'ส่งเข้ากล่อง';
-  }
-};
 
 $('connect').onclick = () => {
   const v = $('pat').value.trim();
