@@ -91,6 +91,15 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  /* ปุ่มถามว่าทำไมล้ม — ที่ทำงานเปิด github.com ไม่ได้ ต้องอ่านจบในหน้านี้ */
+  .why{margin:4px 0 0; padding:5px 9px; font:inherit; font-size:.78rem; cursor:pointer;
+       color:var(--crit); background:var(--crit-bg); border:1px solid var(--crit);
+       border-radius:7px; -webkit-appearance:none}
+  .why[disabled]{opacity:.6; cursor:default}
+  .whybox{display:block; margin:5px 0 2px; font-size:.78rem; line-height:1.5}
+  .whybox .stp{display:block; opacity:.75; margin-bottom:3px}
+  .whybox .err{display:block; margin:3px 0; padding-left:9px;
+               border-left:2px solid var(--crit); white-space:pre-wrap; word-break:break-word}
   .agc .pic{filter:grayscale(1); opacity:.68; transition:filter .2s, opacity .2s}
   .agc.run .pic{filter:none; opacity:1}
   /* สถานะบอกด้วยสามอย่างพร้อมกัน — สัญลักษณ์ สี และคำ
@@ -1358,7 +1367,15 @@ function agentCard(a, where) {
       : (r.status === 'in_progress' || r.status === 'queued') ? '▶ กำลังรัน'
       : r.conclusion === 'failure' ? `✗ ล้ม · ${fmtAgo(r.run_started_at ?? r.created_at)}`
       : `✓ ผ่าน · ${fmtAgo(r.run_started_at ?? r.created_at)}`;
-    return `<span class="bl"><b>${esc(shortRepo(w.repo))}</b> ${esc(st)}</span>`;
+    // repo ของบัญชีอื่นไม่ได้ส่งโทเคนไป (INVARIANTS §8.5) จึงอ่าน annotation ไม่ได้
+    // ไม่ขึ้นปุ่มดีกว่าขึ้นแล้วกดไปเจอ 404
+    const own = w.repo.startsWith(`${AGENT_OWNER}/`);
+    const canAsk = own && r && r.conclusion === 'failure';
+    const btn = canAsk
+      ? `<button class="why" type="button" data-repo="${esc(w.repo)}" data-run="${esc(String(r.id))}"
+           >ทำไมถึงล้ม</button><span class="whybox" data-for="${esc(String(r.id))}"></span>`
+      : '';
+    return `<span class="bl"><b>${esc(shortRepo(w.repo))}</b> ${esc(st)}${btn}</span>`;
   }).join('');
 
   const back = [
@@ -1383,6 +1400,79 @@ function agentCard(a, where) {
     </div>`;
 }
 
+
+// ── ทำไมรอบนั้นถึงล้ม ─────────────────────────────────────
+//
+// ที่ทำงานเปิด github.com ไม่ได้ ลิงก์ "ดู log" จึงเป็นทางตัน
+// แต่ข้อความ ::error:: ที่ workflow เขียนเองออกมาทาง API ได้ในรูป annotation
+// ซึ่งเป็นข้อความไทยที่เราเขียนไว้เองว่าผิดตรงไหนและแก้ยังไง
+//
+// เรียกเฉพาะตอนกด ไม่ใช่ตอนโหลด — สองครั้งต่อการกดหนึ่งครั้ง
+// ถ้าดึงมาพร้อมรอบ polling จะกินเพดาน 5000/ชม. โดยที่เกือบทุกครั้งไม่มีใครดู
+const failCache = new Map();
+
+// "Process completed with exit code 1." ไม่ได้บอกอะไรที่คนเอาไปทำต่อได้
+// ตัดทิ้งเพื่อให้ข้อความที่เราตั้งใจเขียนเด่นขึ้น ไม่ใช่จมอยู่กับเสียงรบกวน
+const NOISE = [/^Process completed with exit code/i, /^The process .* failed with exit code/i];
+
+async function failReason(repo, runId) {
+  const key = `${repo}#${runId}`;
+  if (failCache.has(key)) return failCache.get(key);
+
+  const token = getToken();
+  const jobs = await ghJson(
+    `https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs`,
+    token, 'application/vnd.github+json',
+  );
+  const job = (jobs.jobs ?? []).find((j) => j.conclusion === 'failure') ?? (jobs.jobs ?? [])[0];
+  const step = job ? (job.steps ?? []).find((x) => x.conclusion === 'failure')?.name ?? '' : '';
+
+  let errors = [];
+  if (job?.check_run_url) {
+    const ann = await ghJson(`${job.check_run_url}/annotations`, token, 'application/vnd.github+json');
+    errors = (Array.isArray(ann) ? ann : [])
+      .filter((a) => a.annotation_level === 'failure')
+      .map((a) => String(a.message ?? '').trim())
+      .filter((m) => m && !NOISE.some((re) => re.test(m)));
+  }
+
+  // annotation เรียงจากใหม่ไปเก่า — คนอ่านจากบนลงล่างตามลำดับที่มันเกิด
+  errors.reverse();
+  const out = { step, errors, url: job?.html_url ?? '' };
+  failCache.set(key, out);
+  return out;
+}
+
+/** ผูกปุ่ม "ทำไมถึงล้ม" หลังวาดเสร็จ */
+function wireWhy(root) {
+  for (const b of root.querySelectorAll('.why')) {
+    b.onclick = async () => {
+      const box = b.parentElement?.querySelector(`.whybox[data-for="${b.dataset.run}"]`);
+      if (!box) return;
+      b.disabled = true;
+      b.textContent = 'กำลังถาม…';
+      try {
+        const { step, errors, url } = await failReason(b.dataset.repo, b.dataset.run);
+        const parts = [];
+        if (step) parts.push(`<span class="stp">ล้มที่ขั้น <b>${esc(step)}</b></span>`);
+        if (errors.length) {
+          for (const m of errors) parts.push(`<span class="err">${esc(m)}</span>`);
+        } else {
+          parts.push('<span class="err">ไม่มีข้อความบอกสาเหตุใน log — ต้องเปิดดูเองที่บ้าน</span>');
+        }
+        if (url) parts.push(`<a href="${esc(url)}" target="_blank" rel="noopener">เปิด log เต็ม</a>`);
+        box.innerHTML = parts.join('');
+        b.remove();
+      } catch (e) {
+        // ล้มตรงนี้ต้องบอกว่าล้มเพราะอะไร ไม่ใช่เงียบแล้วปุ่มค้าง
+        box.innerHTML = `<span class="err">ถามไม่สำเร็จ — ${esc(String(e.status ?? e.message ?? e))}</span>`;
+        b.disabled = false;
+        b.textContent = 'ลองอีกครั้ง';
+      }
+    };
+  }
+}
+
 /** ผูกการพลิกหลังวาดเสร็จ — ลิงก์ไป log ต้องกดได้โดยการ์ดไม่พลิก */
 function wireFlips(root) {
   for (const c of root.querySelectorAll('.agc')) {
@@ -1395,7 +1485,7 @@ function wireFlips(root) {
       if (next === 'true') flips[key] = true; else delete flips[key];
       localStorage.setItem(AGENT_FLIPS_KEY, JSON.stringify(flips));
     };
-    c.onclick = (e) => { if (!e.target.closest('a')) turn(); };
+    c.onclick = (e) => { if (!e.target.closest('a, button')) turn(); };
     c.onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); turn(); }
     };
@@ -1560,6 +1650,7 @@ function renderAgents({ registry, regError, results }) {
     </div>`;
 
   wireFlips($('agents'));
+  wireWhy($('agents'));
   stampAgentsChecked();
   const btn = $('reloadAgents');
   if (btn) btn.onclick = () => loadAgents();
