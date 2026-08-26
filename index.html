@@ -91,6 +91,36 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  /* ปฏิทิน — ตารางเดือน แตะวันแล้วดูรายละเอียดข้างล่าง */
+  .calhead{display:flex; align-items:center; gap:6px; margin-bottom:10px}
+  .calhead #calTitle{flex:1; font-weight:600}
+  .calhead button{min-width:38px; min-height:38px; padding:0 10px; font:inherit; cursor:pointer;
+                  color:inherit; background:transparent; border:1px solid var(--line);
+                  border-radius:9px; -webkit-appearance:none}
+  .calhead button:hover{border-color:var(--accent)}
+  .calgrid{display:grid; grid-template-columns:repeat(7, 1fr); gap:3px}
+  .calgrid .dow{padding:4px 0; text-align:center; font-size:.68rem; opacity:.6}
+  .cell{position:relative; min-height:46px; padding:4px 3px 3px; cursor:pointer;
+        border:1px solid transparent; border-radius:8px; background:var(--card2, rgba(127,127,127,.08));
+        font:inherit; color:inherit; -webkit-appearance:none; text-align:left}
+  .cell.pad{background:transparent; cursor:default}
+  .cell .d{font-size:.76rem; opacity:.85}
+  .cell.today{border-color:var(--accent)}
+  .cell.today .d{color:var(--accent); font-weight:700}
+  .cell.sel{background:var(--accent); color:#fff}
+  .cell.sel .d{color:#fff}
+  .cell.off{background:var(--safe-bg, rgba(80,180,120,.16))}
+  .cell .dots{display:flex; flex-wrap:wrap; gap:2px; margin-top:3px}
+  .cell .dot{width:5px; height:5px; border-radius:50%; background:var(--accent)}
+  .cell .dot.late{background:var(--crit)}
+  .cell .sp{display:block; font-size:.6rem; line-height:1.2; opacity:.8;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  #calDay{margin-top:12px}
+  #calDay .dhead{display:block; font-weight:600; margin-bottom:6px}
+  #calDay .ditem{display:block; padding:8px 0; border-top:1px solid var(--line); font-size:.86rem}
+  #calDay .ditem b.late{color:var(--crit)}
+  #calDay .dmeta{display:block; font-size:.72rem; opacity:.7; margin-top:2px}
+
   /* แชท — กล่องเดียวแทนห้าการ์ดเดิม หน้าตาต้องคุ้นเหมือนแอปแชทที่ใช้อยู่ */
   .chatlog{max-height:52vh; overflow-y:auto; overscroll-behavior:contain;
            display:flex; flex-direction:column; gap:9px; padding:2px 0 4px}
@@ -264,6 +294,7 @@
 <!-- แท็บโผล่หลังเชื่อมต่อแล้วเท่านั้น — ก่อนหน้านั้นมีแค่ช่องกรอกโทเคนให้ทำ -->
 <nav class="tabs hidden" id="tabs">
   <button data-tab="today" class="on">วันนี้</button>
+  <button data-tab="cal">ปฏิทิน</button>
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
   <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
   <button data-tab="log">บันทึก</button>
@@ -349,6 +380,22 @@
   <div class="row" style="margin-top:8px">
     <button class="primary" id="chatSend" style="flex:1">ส่ง</button>
   </div>
+</section>
+
+<!-- ปฏิทิน — งานที่มีกำหนดส่งกับวันพิเศษ วางบนตารางเดือน
+     ข้อมูลมาจาก state/calendar.json ที่ build-calendar.mjs ประกอบไว้แล้ว
+     หน้าเว็บไม่แยก frontmatter หรือ markdown เอง เพราะจะกลายเป็นตัวแยกสองชุด
+     ที่ต้องตรงกัน แล้วพังข้างเดียวเงียบ ๆ ตอนรูปแบบวันที่เปลี่ยน -->
+<section class="card hidden" id="calBox">
+  <div class="calhead">
+    <button type="button" id="calPrev" aria-label="เดือนก่อน">‹</button>
+    <span id="calTitle"></span>
+    <button type="button" id="calNext" aria-label="เดือนถัดไป">›</button>
+    <button type="button" id="calToday">วันนี้</button>
+  </div>
+  <div class="calgrid" id="calGrid"></div>
+  <div id="calDay"></div>
+  <p class="muted" id="calNote" style="margin:8px 0 0"></p>
 </section>
 
 <section id="tasks"></section>
@@ -660,6 +707,7 @@ function render(d) {
   $('otBox').classList.remove('hidden');
   $('timerBox').classList.remove('hidden');
   $('chatBox').classList.remove('hidden');
+  $('calBox').classList.remove('hidden');
   renderDrafts(d.drafts ?? []);
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
@@ -1268,6 +1316,172 @@ function parseQuestion(body) {
   return { ask: head ?? '', options: opts };
 }
 
+
+// ── ปฏิทิน ────────────────────────────────────────────────
+//
+// แสดงงานที่มีกำหนดส่งกับวันพิเศษบนตารางเดือน แล้วเพิ่มงานลงวันที่เลือกได้เลย
+// ข้อมูลมาจาก state/calendar.json ที่ build-calendar.mjs ประกอบไว้แล้ว
+// หน้าเว็บไม่แยก frontmatter เอง — ตัวแยกสองชุดที่ต้องตรงกันคือหนี้ที่จ่ายทีหลังแพง
+//
+// ⚠️ วันที่ทั้งหมดเป็นสตริง YYYY-MM-DD ตามเวลาไทยที่สคริปต์คิดมาแล้ว
+//    ห้ามเอาไปสร้าง Date แล้วอ่านวันกลับ เพราะเบราว์เซอร์จะตีเป็น UTC แล้วเลื่อนไปหนึ่งวัน
+
+const CAL_DOW = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+const CAL_MONTH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const CAL_CONTEXT = [
+  { v: 'work', label: 'งานโรงงาน' },
+  { v: 'project', label: 'โปรเจค' },
+  { v: 'life', label: 'ชีวิต' },
+];
+const CAL_DEFAULT_EST = 1;
+
+const calState = { data: null, ym: null, sel: null, ctx: 'work' };
+
+const ymd = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+async function loadCalendar() {
+  const token = getToken();
+  if (!token || !$('calGrid')) return;
+  try {
+    const j = await ghJson(
+      `https://api.github.com/repos/${REPO}/contents/state/calendar.json?ref=${STATE_REF}`,
+      token, 'application/vnd.github.raw',
+    );
+    calState.data = j;
+    if (!calState.ym) {
+      const [y, m] = String(j.today).split('-').map(Number);
+      calState.ym = { y, m: m - 1 };
+    }
+    $('calNote').textContent = (j.warnings ?? []).length
+      ? `ปฏิทินพิเศษมีบรรทัดที่อ่านไม่ออก ${j.warnings.length} บรรทัด`
+      : '';
+    renderMonth();
+  } catch (e) {
+    const code = String(e.status ?? e.message ?? e);
+    $('calNote').innerHTML = code === '404'
+      ? 'ยังไม่มี <code>state/calendar.json</code> — รอ daily-plan รอบถัดไป'
+      : `อ่านปฏิทินไม่ได้ — ${esc(code)}`;
+  }
+}
+
+function renderMonth() {
+  const { y, m } = calState.ym;
+  const days = calState.data?.days ?? {};
+  const today = calState.data?.today ?? '';
+  $('calTitle').textContent = `${CAL_MONTH[m]} ${y + 543}`;
+
+  const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+  const total = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+
+  const cells = [];
+  for (let i = 0; i < 7; i += 1) cells.push(`<span class="dow">${CAL_DOW[i]}</span>`);
+  for (let i = 0; i < first; i += 1) cells.push('<span class="cell pad"></span>');
+
+  for (let d = 1; d <= total; d += 1) {
+    const date = ymd(y, m, d);
+    const info = days[date];
+    const cls = ['cell'];
+    if (date === today) cls.push('today');
+    if (date === calState.sel) cls.push('sel');
+    if (info?.special) cls.push('off');
+    const dots = (info?.tasks ?? []).slice(0, 6)
+      .map((t) => `<i class="dot${t.overdue ? ' late' : ''}"></i>`).join('');
+    cells.push(`<button type="button" class="${cls.join(' ')}" data-date="${esc(date)}">
+        <span class="d">${d}</span>
+        ${info?.special ? `<span class="sp">${esc(info.special.kindWord)}</span>` : ''}
+        <span class="dots">${dots}</span>
+      </button>`);
+  }
+  $('calGrid').innerHTML = cells.join('');
+  for (const b of $('calGrid').querySelectorAll('.cell[data-date]')) {
+    b.onclick = () => { calState.sel = b.dataset.date; renderMonth(); renderDay(); };
+  }
+  if (calState.sel) renderDay();
+}
+
+function renderDay() {
+  const date = calState.sel;
+  const info = calState.data?.days?.[date];
+  const [, mm, dd] = date.split('-');
+  const head = `${Number(dd)} ${CAL_MONTH[Number(mm) - 1]}`;
+
+  const items = (info?.tasks ?? []).map((t) => `<span class="ditem">
+      <b${t.overdue ? ' class="late"' : ''}>${esc(t.title)}</b>
+      <span class="dmeta">${esc([t.context, t.est ? `${t.est} ชม.` : '', t.overdue ? 'เลยกำหนด' : '']
+        .filter(Boolean).join(' · '))}</span>
+    </span>`).join('');
+
+  const chips = CAL_CONTEXT.map((c) => `<button type="button" class="cctx${c.v === calState.ctx ? ' on' : ''}"
+      data-ctx="${c.v}">${esc(c.label)}</button>`).join('');
+
+  $('calDay').innerHTML = `
+    <span class="dhead">${esc(head)}${info?.special ? ` · ${esc(info.special.kindWord)} ${esc(info.special.note)}` : ''}</span>
+    ${items || '<span class="ditem muted">ยังไม่มีงานลงวันนี้</span>'}
+    <div class="chips" style="margin-top:10px">${chips}</div>
+    <span class="row">
+      <input id="calAdd" placeholder="เพิ่มงานลงวันนี้" style="flex:1; min-width:0">
+      <button type="button" class="primary" id="calAddGo">เพิ่ม</button>
+    </span>
+    <span class="qmsg" id="calAddMsg">ตั้งต้น ${CAL_DEFAULT_EST} ชม. แก้ทีหลังในไฟล์งานได้</span>`;
+
+  for (const c of $('calDay').querySelectorAll('.cctx')) {
+    c.onclick = () => { calState.ctx = c.dataset.ctx; renderDay(); };
+  }
+  $('calAddGo').onclick = addTaskOnDay;
+  $('calAdd').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addTaskOnDay(); } };
+}
+
+/** เพิ่มงานลงวันที่เลือก — เดินทางเดียวกับที่พิมพ์ "เพิ่มงาน ..." ในแชท */
+async function addTaskOnDay() {
+  const box = $('calAdd');
+  const title = box.value.trim();
+  const msg = $('calAddMsg');
+  if (!title) return;
+  const token = getToken();
+  if (!token) return;
+
+  $('calAddGo').disabled = true;
+  msg.textContent = 'กำลังเพิ่ม…';
+  try {
+    // issue-intake.mjs อ่านสเปกจากเนื้อเป็นบรรทัด key: value — createTask ต้องได้ครบสามอย่าง
+    const body = [`context: ${calState.ctx}`, `est: ${CAL_DEFAULT_EST}`, `deadline: ${calState.sel}`].join('\n');
+    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ title: `เพิ่มงาน ${title}`.slice(0, 80), body }),
+    });
+    if (!res.ok) {
+      msg.innerHTML = (res.status === 403 || res.status === 404)
+        ? '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+        : `เพิ่มไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
+      return;
+    }
+    box.value = '';
+    // ปฏิทินสดหลัง inbox-collect ทำงานเสร็จ ราวครึ่งนาที ไม่ใช่ทันที
+    msg.textContent = 'เพิ่มแล้ว — จะขึ้นบนปฏิทินหลังระบบเก็บเข้าไฟล์ ราวครึ่งนาที';
+    setTimeout(loadCalendar, 30000);
+  } catch (e) {
+    msg.textContent = `เพิ่มไม่สำเร็จ — ${e.message}`;
+  } finally {
+    $('calAddGo').disabled = false;
+  }
+}
+
+$('calPrev').onclick = () => { calState.ym.m -= 1; if (calState.ym.m < 0) { calState.ym.m = 11; calState.ym.y -= 1; } renderMonth(); };
+$('calNext').onclick = () => { calState.ym.m += 1; if (calState.ym.m > 11) { calState.ym.m = 0; calState.ym.y += 1; } renderMonth(); };
+$('calToday').onclick = () => {
+  const [y, m] = String(calState.data?.today ?? '').split('-').map(Number);
+  if (!y) return;
+  calState.ym = { y, m: m - 1 };
+  calState.sel = calState.data.today;
+  renderMonth();
+};
+
 // คำขึ้นต้นที่ระบบรู้จัก — **ต้องตรงกับ ROUTES ใน apps-script/Code.gs**
 // ทั้งสองทางเปิด issue ใบเดียวกันแบบเดียวกัน ถ้าคัดแยกคนละแบบ เจ้าของต้องจำสองชุด
 const CHAT_ROUTES = [
@@ -1758,6 +1972,7 @@ function renderAgents({ registry, regError, results }) {
 
 const TABS = {
   today:    ['plan', 'tasks', 'drafts'],
+  cal:      ['calBox'],
   projects: ['projects'],
   agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
@@ -1820,6 +2035,7 @@ for (const b of document.querySelectorAll('nav.tabs button')) {
     clearTimeout(agentsState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม
     agentsState.timer = null;
   }
+  if (tab === 'cal') loadCalendar();
   if (tab === 'do') {
     loadChat();
   } else {
