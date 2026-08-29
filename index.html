@@ -91,6 +91,30 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  /* แผนผังความรู้ — วาดด้วย SVG ล้วน ไม่มี dependency ตามข้อบังคับของหน้านี้ */
+  #knMap{width:100%; height:56vh; touch-action:none; display:block;
+         background:var(--card2, rgba(127,127,127,.06)); border-radius:10px}
+  #knMap line{stroke:var(--line); stroke-width:1}
+  #knMap circle{cursor:pointer}
+  #knMap .nd{fill:var(--accent)}
+  #knMap .nd.un{fill:none; stroke:var(--accent); stroke-width:1.5; stroke-dasharray:2 2}
+  #knMap .nd.iso{fill:var(--crit)}
+  #knMap text{font-size:9px; fill:var(--fg); pointer-events:none; paint-order:stroke;
+              stroke:var(--bg); stroke-width:3px; stroke-linejoin:round}
+  .knbar{display:flex; gap:6px; margin-bottom:10px}
+  .knbar button{flex:1; padding:8px; font:inherit; font-size:.82rem; cursor:pointer;
+                color:inherit; background:transparent; border:1px solid var(--line);
+                border-radius:9px; -webkit-appearance:none}
+  .knbar button.on{background:var(--accent); color:#fff; border-color:transparent}
+  .lnk{display:block; margin-top:8px; font-size:.8rem}
+  .lnk b{display:block; opacity:.7; font-weight:400; margin-bottom:3px}
+  .lnk .go{display:inline-block; margin:0 5px 5px 0; padding:4px 9px; cursor:pointer;
+           font:inherit; font-size:.78rem; color:inherit; background:transparent;
+           border:1px solid var(--line); border-radius:999px; -webkit-appearance:none}
+  .lnk .go:hover{border-color:var(--accent)}
+  .lnk .dead{display:inline-block; margin:0 5px 5px 0; padding:4px 9px;
+             font-size:.78rem; opacity:.55; border:1px dashed var(--line); border-radius:999px}
+
   /* ความรู้ — รายการอ่านง่ายบนมือถือ แตะแล้วอ่านในหน้าเดียวกัน */
   #knFind{width:100%; margin-bottom:10px}
   .knit{display:block; width:100%; text-align:left; padding:10px 0; cursor:pointer;
@@ -448,6 +472,11 @@
         สถานะนี้ต้องเห็นทั้งในรายการและตอนเปิดอ่าน การอ่านร่างที่ยังไม่ตรวจ
         โดยไม่รู้ตัว อันตรายกว่าการไม่มีโน้ตนั้นเลย -->
 <section class="card hidden" id="knBox">
+  <div class="knbar" id="knBar">
+    <button type="button" data-view="list" class="on">รายการ</button>
+    <button type="button" data-view="map">แผนผัง</button>
+  </div>
+  <svg id="knMap" style="display:none"></svg>
   <input id="knFind" placeholder="ค้นจากชื่อหรือแท็ก">
   <div id="knList"></div>
   <div id="knRead"></div>
@@ -1383,7 +1412,7 @@ function parseQuestion(body) {
 //    ป้าย "ยังไม่ตรวจ" ต้องอยู่ทั้งในรายการและบนหัวโน้ตตอนเปิดอ่าน
 //    คนอ่านตอนอยู่หน้างานต้องรู้ทันทีว่ากำลังอ่านอะไรอยู่
 
-const knState = { index: null, open: null, bodies: new Map() };
+const knState = { index: null, open: null, view: 'list', bodies: new Map() };
 
 async function loadKnowledge() {
   const token = getToken();
@@ -1451,7 +1480,7 @@ async function openNote(file) {
     $('knRead').innerHTML = `<button class="knback" type="button">← กลับไปที่รายการ</button>
       <p>${item.verified ? '<i class="okv">ตรวจแล้ว</i>' : '<i class="warn">ยังไม่ผ่านการตรวจ</i>'}<span class="muted"> ${
         esc([item.updated, item.source].filter(Boolean).join(' · '))}</span></p>
-      ${mdNote(body)}`;
+      ${mdNote(body)}${linkBox(item)}`;
     wireNote();
   } catch (e) {
     const code = String(e.status ?? e.message ?? e);
@@ -1461,9 +1490,29 @@ async function openNote(file) {
   }
 }
 
+/** ท้ายโน้ต — เส้นเชื่อมสองทาง กดแล้วไปต่อได้โดยไม่ต้องกลับไปที่รายการ */
+function linkBox(item) {
+  const row = (label, names, dead) => (names.length
+    ? `<span class="lnk"><b>${label}</b>${names.map((t) => (dead
+      ? `<i class="dead">${esc(t)}</i>`
+      : `<button class="go" type="button" data-to="${esc(t)}">${esc(t)}</button>`)).join('')}</span>`
+    : '');
+  return `<div style="margin-top:14px; border-top:1px solid var(--line); padding-top:10px">
+      ${row('เชื่อมไปหา', item.links ?? [], false)}
+      ${row('ถูกอ้างจาก', item.backlinks ?? [], false)}
+      ${row('อยู่นอกคลังความรู้', item.unresolved ?? [], true)}
+    </div>`;
+}
+
 function wireNote() {
   const back = $('knRead').querySelector('.knback');
   if (back) back.onclick = renderKnList;
+  for (const g of $('knRead').querySelectorAll('.go')) {
+    g.onclick = () => {
+      const hit = (knState.index?.items ?? []).find((i) => i.title === g.dataset.to);
+      if (hit) openNote(hit.file);
+    };
+  }
   for (const w of $('knRead').querySelectorAll('.wl')) {
     w.onclick = () => {
       // wikilink ชี้ด้วยชื่อโน้ต ไม่ใช่ชื่อไฟล์ — เทียบแบบไม่สนตัวพิมพ์เผื่อพิมพ์ต่างกัน
@@ -1541,6 +1590,125 @@ function mdNote(src) {
 }
 
 $('knFind').oninput = () => { if (!knState.open) renderKnList(); };
+
+
+/**
+ * แผนผังความรู้ — วางโหนดด้วยแรงดึงดูดอย่างง่าย ไม่มีไลบรารี
+ *
+ * ยืมแนวคิดจากสัญญาข้อมูลของ Synna: โน้ต = โหนด · wikilink = เส้น
+ * โหนดที่ไม่เชื่อมกับใครเลยขึ้นสีเตือน เพราะมันคือของที่หาไม่เจอเวลาไล่จากโน้ตอื่น
+ *
+ * ⚠️ รันซ้ำได้ผลเดิมเสมอ — ตำแหน่งเริ่มต้นวางเป็นวงกลมตามลำดับ ไม่ได้สุ่ม
+ *    ถ้าสุ่ม แผนผังจะเปลี่ยนหน้าตาทุกครั้งที่เปิด แล้วคนจะจำรูปของคลังไม่ได้
+ */
+function layoutMap(items, w, h, rounds = 300) {
+  const n = items.length;
+  const idx = new Map(items.map((i, k) => [i.title, k]));
+  const cx = w / 2;
+  const cy = h / 2;
+  const r0 = Math.min(w, h) * 0.36;
+  const pos = items.map((_, k) => ({
+    x: cx + r0 * Math.cos((2 * Math.PI * k) / n),
+    y: cy + r0 * Math.sin((2 * Math.PI * k) / n),
+  }));
+
+  const edges = [];
+  items.forEach((it, a) => {
+    for (const to of it.links) {
+      const b = idx.get(to);
+      if (b !== undefined && a !== b) edges.push([a, b]);
+    }
+  });
+
+  const ideal = Math.min(w, h) / Math.max(3, Math.sqrt(n));
+  for (let step = 0; step < rounds; step += 1) {
+    const cool = 1 - step / rounds;
+    // ผลักกันทุกคู่ ไม่ให้ทับกันจนอ่านชื่อไม่ออก
+    for (let a = 0; a < n; a += 1) {
+      for (let b = a + 1; b < n; b += 1) {
+        let dx = pos[a].x - pos[b].x;
+        let dy = pos[a].y - pos[b].y;
+        let d = Math.hypot(dx, dy) || 0.01;
+        const f = (ideal * ideal) / d * 0.02 * cool;
+        dx /= d; dy /= d;
+        pos[a].x += dx * f; pos[a].y += dy * f;
+        pos[b].x -= dx * f; pos[b].y -= dy * f;
+      }
+    }
+    // เส้นเชื่อมดึงเข้าหากัน
+    for (const [a, b] of edges) {
+      let dx = pos[b].x - pos[a].x;
+      let dy = pos[b].y - pos[a].y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      const f = (d - ideal) * 0.05 * cool;
+      dx /= d; dy /= d;
+      pos[a].x += dx * f; pos[a].y += dy * f;
+      pos[b].x -= dx * f; pos[b].y -= dy * f;
+    }
+    // ดึงเข้ากลางเบา ๆ กันหลุดขอบ
+    for (const q of pos) {
+      q.x += (cx - q.x) * 0.008;
+      q.y += (cy - q.y) * 0.008;
+      q.x = Math.max(24, Math.min(w - 24, q.x));
+      q.y = Math.max(16, Math.min(h - 16, q.y));
+    }
+  }
+  return { pos, edges };
+}
+
+function renderKnMap() {
+  const svg = $('knMap');
+  const items = knState.index?.items ?? [];
+  if (!items.length) { svg.innerHTML = ''; return; }
+
+  const w = svg.clientWidth || 340;
+  const h = svg.clientHeight || 380;
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const { pos, edges } = layoutMap(items, w, h);
+
+  const deg = items.map((i) => i.links.length + i.backlinks.length);
+  const maxDeg = Math.max(1, ...deg);
+
+  const parts = edges.map(([a, b]) =>
+    `<line x1="${pos[a].x.toFixed(1)}" y1="${pos[a].y.toFixed(1)}" x2="${pos[b].x.toFixed(1)}" y2="${pos[b].y.toFixed(1)}"/>`);
+
+  items.forEach((it, k) => {
+    const r = 3 + 5 * (deg[k] / maxDeg);
+    const cls = deg[k] === 0 ? 'nd iso' : (it.verified ? 'nd' : 'nd un');
+    parts.push(`<circle class="${cls}" cx="${pos[k].x.toFixed(1)}" cy="${pos[k].y.toFixed(1)}" r="${r.toFixed(1)}"
+      data-file="${esc(it.file)}"><title>${esc(it.title)}</title></circle>`);
+    // ขึ้นชื่อเฉพาะตัวที่เชื่อมเยอะ ไม่งั้นตัวหนังสือทับกันจนอ่านไม่ออก
+    if (deg[k] >= Math.max(2, maxDeg * 0.4)) {
+      parts.push(`<text x="${pos[k].x.toFixed(1)}" y="${(pos[k].y - r - 3).toFixed(1)}" text-anchor="middle"
+        >${esc(it.title.length > 18 ? `${it.title.slice(0, 18)}…` : it.title)}</text>`);
+    }
+  });
+
+  svg.innerHTML = parts.join('');
+  for (const c of svg.querySelectorAll('circle')) {
+    c.onclick = () => { knSetView('list'); openNote(c.dataset.file); };
+  }
+}
+
+function knSetView(v) {
+  knState.view = v;
+  for (const b of $('knBar').querySelectorAll('button')) b.classList.toggle('on', b.dataset.view === v);
+  const map = v === 'map';
+  $('knMap').style.display = map ? '' : 'none';
+  $('knFind').style.display = map ? 'none' : '';
+  $('knList').style.display = map ? 'none' : '';
+  $('knRead').style.display = map ? 'none' : '';
+  if (map) {
+    renderKnMap();
+    const k = knState.index ?? {};
+    $('knNote').textContent = `${k.count ?? 0} โน้ต · ${k.edges ?? 0} เส้นเชื่อม`
+      + ((k.isolated ?? []).length ? ` · ไม่เชื่อมกับใครเลย ${k.isolated.length}` : '');
+  }
+}
+
+for (const b of document.querySelectorAll('#knBar button')) {
+  b.onclick = () => { if (b.dataset.view === 'list') { knSetView('list'); renderKnList(); } else knSetView('map'); };
+}
 
 // ── ปฏิทิน ────────────────────────────────────────────────
 //
