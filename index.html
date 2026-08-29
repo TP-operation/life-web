@@ -1168,6 +1168,22 @@ async function ghJson(url, token, accept) {
   return r.json();
 }
 
+/**
+ * ดึงไฟล์ในรูปข้อความดิบ — ใช้กับ .md ที่ไม่ใช่ JSON
+ *
+ * ⚠️ ghJson เรียก r.json() เสมอ เอาไปดึงไฟล์ markdown จะพังทันทีที่บรรทัดแรก
+ *    เพราะ frontmatter ขึ้นต้นด้วย --- แล้ว JSON.parse อ่านว่าเป็นเลขติดลบ
+ *    ได้ error "No number after minus sign" ซึ่งไม่ได้บอกอะไรเลยว่าเกิดจากอะไร
+ *    (เกิดจริงกับหน้าอ่านความรู้ 29 ส.ค. 2026)
+ */
+async function ghText(url, token) {
+  const headers = { Accept: 'application/vnd.github.raw' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const r = await fetch(url, { headers, cache: 'no-store' });
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+  return r.text();
+}
+
 /** ลายเซ็นของสิ่งที่เห็นอยู่ — ใช้ตัดสินว่ารอบนี้ต้องวาดใหม่ไหม */
 function agentsSignature(registry, results) {
   const runs = results.flatMap((r) => (r.runs ?? []).map(
@@ -1470,11 +1486,11 @@ async function openNote(file) {
 
   try {
     if (!knState.bodies.has(file)) {
-      const raw = await ghJson(
+      const raw = await ghText(
         `https://api.github.com/repos/${REPO}/contents/30-knowledge/${encodeURIComponent(file)}`,
-        getToken(), 'application/vnd.github.raw',
+        getToken(),
       );
-      knState.bodies.set(file, typeof raw === 'string' ? raw : JSON.stringify(raw));
+      knState.bodies.set(file, raw);
     }
     const body = String(knState.bodies.get(file)).replace(/^---\n[\s\S]*?\n---\n?/, '');
     $('knRead').innerHTML = `<button class="knback" type="button">← กลับไปที่รายการ</button>
