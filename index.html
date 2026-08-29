@@ -91,6 +91,36 @@
   .agc.bad  .front{border-top-color:var(--crit); background:var(--crit-bg)}
   /* รูปสีสดเฉพาะตัวที่กำลังรันอยู่ ที่เหลือซีดหมด — สถานะที่เหลือไปอ่านจากแถบสีกับคำแทน
      ถ้าทุกใบสีสดเท่ากัน ตาจะไม่รู้ว่าควรมองใบไหนก่อน ซึ่งเป็นคำถามเดียวที่หน้านี้ต้องตอบ */
+  /* ความรู้ — รายการอ่านง่ายบนมือถือ แตะแล้วอ่านในหน้าเดียวกัน */
+  #knFind{width:100%; margin-bottom:10px}
+  .knit{display:block; width:100%; text-align:left; padding:10px 0; cursor:pointer;
+        font:inherit; color:inherit; background:transparent; border:0;
+        border-top:1px solid var(--line); -webkit-appearance:none}
+  .knit:first-child{border-top:0}
+  .knit .t{display:block; font-weight:600; line-height:1.4}
+  .knit .x{display:block; margin-top:3px; font-size:.78rem; opacity:.75; line-height:1.45}
+  .knit .m{display:block; margin-top:4px; font-size:.7rem; opacity:.6}
+  .warn{display:inline-block; padding:1px 6px; margin-right:5px; border-radius:5px;
+        font-size:.68rem; color:var(--crit); background:var(--crit-bg); border:1px solid var(--crit)}
+  .okv{display:inline-block; padding:1px 6px; margin-right:5px; border-radius:5px;
+       font-size:.68rem; color:var(--safe); border:1px solid var(--safe)}
+  #knRead{line-height:1.6}
+  #knRead h1{font-size:1.05rem; margin:0 0 10px}
+  #knRead h2{font-size:.95rem; margin:16px 0 6px}
+  #knRead h3{font-size:.88rem; margin:12px 0 4px; opacity:.9}
+  #knRead p{margin:0 0 9px}
+  #knRead li{margin:0 0 5px 18px}
+  #knRead pre{padding:9px; overflow-x:auto; font-size:.8rem;
+              background:var(--card2, rgba(127,127,127,.12)); border-radius:8px}
+  #knRead blockquote{margin:0 0 10px; padding:8px 11px; border-left:3px solid var(--crit);
+                     background:var(--crit-bg); border-radius:0 8px 8px 0; font-size:.85rem}
+  #knRead .wl{color:var(--accent); cursor:pointer; text-decoration:underline}
+  #knRead table{width:100%; border-collapse:collapse; font-size:.8rem; margin:0 0 10px; display:block; overflow-x:auto}
+  #knRead td, #knRead th{padding:5px 8px; border:1px solid var(--line); text-align:left}
+  .knback{margin-bottom:10px; padding:7px 12px; font:inherit; font-size:.82rem; cursor:pointer;
+          color:inherit; background:transparent; border:1px solid var(--line);
+          border-radius:9px; -webkit-appearance:none}
+
   /* ปฏิทิน — ตารางเดือน แตะวันแล้วดูรายละเอียดข้างล่าง */
   .calhead{display:flex; align-items:center; gap:6px; margin-bottom:10px}
   .calhead #calTitle{flex:1; font-weight:600}
@@ -306,6 +336,7 @@
 <nav class="tabs hidden" id="tabs">
   <button data-tab="today" class="on">วันนี้</button>
   <button data-tab="cal">ปฏิทิน</button>
+  <button data-tab="kn">ความรู้</button>
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
   <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
   <button data-tab="log">บันทึก</button>
@@ -407,6 +438,20 @@
   <div class="calgrid" id="calGrid"></div>
   <div id="calDay"></div>
   <p class="muted" id="calNote" style="margin:8px 0 0"></p>
+</section>
+
+<!-- ความรู้ — โน้ตที่ Ada เขียนตอนตอบคำถาม กับที่เจ้าของเขียนเอง
+     สารบัญมาจาก state/knowledge.json เนื้อดึงทีละใบตอนกดอ่าน
+     ถ้ายัดเนื้อลงสารบัญ ปีหน้าจะโหลดทั้งคลังทุกครั้งที่เปิดแท็บ
+
+     ⚠️ 16 จาก 18 ใบเป็นร่างจาก AI ที่ยังไม่ผ่านการตรวจ และเป็นเรื่องยา
+        สถานะนี้ต้องเห็นทั้งในรายการและตอนเปิดอ่าน การอ่านร่างที่ยังไม่ตรวจ
+        โดยไม่รู้ตัว อันตรายกว่าการไม่มีโน้ตนั้นเลย -->
+<section class="card hidden" id="knBox">
+  <input id="knFind" placeholder="ค้นจากชื่อหรือแท็ก">
+  <div id="knList"></div>
+  <div id="knRead"></div>
+  <p class="muted" id="knNote" style="margin:8px 0 0"></p>
 </section>
 
 <section id="tasks"></section>
@@ -719,6 +764,7 @@ function render(d) {
   $('timerBox').classList.remove('hidden');
   $('chatBox').classList.remove('hidden');
   $('calBox').classList.remove('hidden');
+  $('knBox').classList.remove('hidden');
   renderDrafts(d.drafts ?? []);
   speechLines = Array.isArray(d.speechLines) ? d.speechLines : (d.speech ? [d.speech] : []);
 }
@@ -1327,6 +1373,174 @@ function parseQuestion(body) {
   return { ask: head ?? '', options: opts };
 }
 
+
+
+// ── ความรู้ ───────────────────────────────────────────────
+//
+// สารบัญมาจาก state/knowledge.json · เนื้อดึงทีละใบจาก 30-knowledge/ ตอนกดอ่าน
+//
+// ⚠️ ส่วนใหญ่เป็นร่างจาก AI ที่ยังไม่ผ่านการตรวจ และเป็นเรื่องยา
+//    ป้าย "ยังไม่ตรวจ" ต้องอยู่ทั้งในรายการและบนหัวโน้ตตอนเปิดอ่าน
+//    คนอ่านตอนอยู่หน้างานต้องรู้ทันทีว่ากำลังอ่านอะไรอยู่
+
+const knState = { index: null, open: null, bodies: new Map() };
+
+async function loadKnowledge() {
+  const token = getToken();
+  if (!token || !$('knList')) return;
+  if (knState.index) { renderKnList(); return; }
+  try {
+    knState.index = await ghJson(
+      `https://api.github.com/repos/${REPO}/contents/state/knowledge.json?ref=${STATE_REF}`,
+      token, 'application/vnd.github.raw',
+    );
+    renderKnList();
+  } catch (e) {
+    const code = String(e.status ?? e.message ?? e);
+    $('knNote').innerHTML = code === '404'
+      ? 'ยังไม่มี <code>state/knowledge.json</code> — รอ daily-plan รอบถัดไป'
+      : `อ่านสารบัญไม่ได้ — ${esc(code)}`;
+  }
+}
+
+function renderKnList() {
+  knState.open = null;
+  $('knRead').innerHTML = '';
+  $('knFind').style.display = '';
+  const q = ($('knFind').value ?? '').trim().toLowerCase();
+  const all = knState.index?.items ?? [];
+  const hit = q
+    ? all.filter((i) => `${i.title} ${i.tags.join(' ')}`.toLowerCase().includes(q))
+    : all;
+
+  $('knList').innerHTML = hit.map((i) => `<button class="knit" type="button" data-file="${esc(i.file)}">
+      <span class="t">${esc(i.title)}</span>
+      ${i.excerpt ? `<span class="x">${esc(i.excerpt)}</span>` : ''}
+      <span class="m">${i.verified ? '<i class="okv">ตรวจแล้ว</i>' : '<i class="warn">ยังไม่ตรวจ</i>'}${
+        esc([i.updated, ...i.tags.slice(0, 4)].filter(Boolean).join(' · '))}</span>
+    </button>`).join('');
+
+  for (const b of $('knList').querySelectorAll('.knit')) {
+    b.onclick = () => openNote(b.dataset.file);
+  }
+  const n = knState.index?.count ?? 0;
+  const u = knState.index?.unverified ?? 0;
+  $('knNote').textContent = q
+    ? `เจอ ${hit.length} จาก ${n} โน้ต`
+    : `${n} โน้ต · ยังไม่ผ่านการตรวจ ${u}`;
+}
+
+async function openNote(file) {
+  const item = (knState.index?.items ?? []).find((i) => i.file === file);
+  if (!item) return;
+  knState.open = file;
+  $('knFind').style.display = 'none';
+  $('knList').innerHTML = '';
+  $('knNote').textContent = '';
+  $('knRead').innerHTML = '<p class="muted">กำลังเปิด…</p>';
+
+  try {
+    if (!knState.bodies.has(file)) {
+      const raw = await ghJson(
+        `https://api.github.com/repos/${REPO}/contents/30-knowledge/${encodeURIComponent(file)}`,
+        getToken(), 'application/vnd.github.raw',
+      );
+      knState.bodies.set(file, typeof raw === 'string' ? raw : JSON.stringify(raw));
+    }
+    const body = String(knState.bodies.get(file)).replace(/^---\n[\s\S]*?\n---\n?/, '');
+    $('knRead').innerHTML = `<button class="knback" type="button">← กลับไปที่รายการ</button>
+      <p>${item.verified ? '<i class="okv">ตรวจแล้ว</i>' : '<i class="warn">ยังไม่ผ่านการตรวจ</i>'}<span class="muted"> ${
+        esc([item.updated, item.source].filter(Boolean).join(' · '))}</span></p>
+      ${mdNote(body)}`;
+    wireNote();
+  } catch (e) {
+    const code = String(e.status ?? e.message ?? e);
+    $('knRead').innerHTML = `<button class="knback" type="button">← กลับไปที่รายการ</button>
+      <p class="muted">เปิดโน้ตไม่ได้ — ${esc(code)}${code === '404' ? ' (ไฟล์อาจถูกเปลี่ยนชื่อ)' : ''}</p>`;
+    wireNote();
+  }
+}
+
+function wireNote() {
+  const back = $('knRead').querySelector('.knback');
+  if (back) back.onclick = renderKnList;
+  for (const w of $('knRead').querySelectorAll('.wl')) {
+    w.onclick = () => {
+      // wikilink ชี้ด้วยชื่อโน้ต ไม่ใช่ชื่อไฟล์ — เทียบแบบไม่สนตัวพิมพ์เผื่อพิมพ์ต่างกัน
+      const want = String(w.dataset.to ?? '').toLowerCase();
+      const hit = (knState.index?.items ?? []).find((i) => i.title.toLowerCase() === want);
+      if (hit) openNote(hit.file);
+    };
+  }
+}
+
+/**
+ * markdown เท่าที่โน้ตความรู้ใช้จริง — ไม่มี dependency ตามข้อบังคับของหน้านี้
+ * หัวข้อ · ย่อหน้า · รายการ · โค้ด · คำอ้าง · ตาราง · wikilink
+ * ทุกอย่างผ่าน esc ก่อนเสมอ เนื้อโน้ตมาจาก repo แต่ปฏิบัติกับมันเหมือนข้อความภายนอก
+ */
+function mdNote(src) {
+  const lines = String(src ?? '').split('\n');
+  const out = [];
+  let inCode = false;
+  let code = [];
+  let list = null;
+  let table = null;
+
+  const inline = (t) => esc(t)
+    .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, (m, to, label) => `<span class="wl" data-to="${esc(to)}">${label}</span>`)
+    .replace(/\[\[([^\]]*)\]\]/g, (m, to) => `<span class="wl" data-to="${esc(to)}">${to}</span>`)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  const closeList = () => { if (list) { out.push(`<${list.tag}>${list.items.join('')}</${list.tag}>`); list = null; } };
+  const closeTable = () => { if (table) { out.push(`<table>${table.join('')}</table>`); table = null; } };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\r/g, '');
+    if (/^```/.test(line.trim())) {
+      if (inCode) { out.push(`<pre>${esc(code.join('\n'))}</pre>`); code = []; }
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { code.push(line); continue; }
+
+    const t = line.trim();
+    if (!t) { closeList(); closeTable(); continue; }
+
+    // แถวคั่นของตาราง เช่น |---|---| ไม่ต้องแสดง
+    if (/^\|[\s|:-]+\|$/.test(t)) continue;
+    if (/^\|.*\|$/.test(t)) {
+      closeList();
+      const cells = t.slice(1, -1).split('|').map((c) => `<td>${inline(c.trim())}</td>`).join('');
+      (table = table ?? []).push(`<tr>${cells}</tr>`);
+      continue;
+    }
+    closeTable();
+
+    const h = /^(#{1,3})\s+(.*)$/.exec(t);
+    if (h) { closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+
+    if (t.startsWith('>')) { closeList(); out.push(`<blockquote>${inline(t.replace(/^>\s?/, ''))}</blockquote>`); continue; }
+
+    const li = /^([-*]|\d+\.)\s+(.*)$/.exec(t);
+    if (li) {
+      const tag = /^\d/.test(li[1]) ? 'ol' : 'ul';
+      if (!list || list.tag !== tag) { closeList(); list = { tag, items: [] }; }
+      list.items.push(`<li>${inline(li[2])}</li>`);
+      continue;
+    }
+
+    closeList();
+    out.push(`<p>${inline(t)}</p>`);
+  }
+  if (inCode && code.length) out.push(`<pre>${esc(code.join('\n'))}</pre>`);
+  closeList();
+  closeTable();
+  return out.join('');
+}
+
+$('knFind').oninput = () => { if (!knState.open) renderKnList(); };
 
 // ── ปฏิทิน ────────────────────────────────────────────────
 //
@@ -2059,6 +2273,7 @@ function renderAgents({ registry, regError, results }) {
 const TABS = {
   today:    ['plan', 'tasks', 'drafts'],
   cal:      ['calBox'],
+  kn:       ['knBox'],
   projects: ['projects'],
   agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
@@ -2122,6 +2337,7 @@ for (const b of document.querySelectorAll('nav.tabs button')) {
     agentsState.timer = null;
   }
   if (tab === 'cal') loadCalendar();
+  if (tab === 'kn') loadKnowledge();
   if (tab === 'do') {
     loadChat();
   } else {
