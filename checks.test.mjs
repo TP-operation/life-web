@@ -8,12 +8,20 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   check, inlineScripts, topLevelNames, duplicateNames, idsIn, idsUsed, hostsIn, ALLOWED_HOSTS,
+  chatRoutesIn,
 } from './checks.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const REAL = readFileSync(`${ROOT}index.html`, 'utf8');
 
-const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`;
+// ทุก fixture ต้องเป็น "หน้าที่ถูกต้องอยู่แล้ว" ยกเว้นสิ่งที่เทสนั้นตั้งใจทำให้ผิด
+// จึงต้องมี CHAT_ROUTES ครบติดมาด้วย ไม่งั้นทุกเทสจะแดงเพราะเรื่องที่ไม่ได้ทดสอบ
+const ROUTES_OK = `<script>const CHAT_ROUTES = [`
+  + ['ออกกำลังกาย', 'ปิดงาน', 'เพิ่มงาน', 'โอที', 'ยืนยันงาน', 'ทิ้งงาน', 'นัด', 'สั่ง', 'ถาม']
+    .map((p) => `{ p: '${p}' },`).join('')
+  + `];</script>`;
+
+const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}${ROUTES_OK}</body></html>`;
 
 // ---------- หน้าจริงต้องผ่าน ----------
 
@@ -123,4 +131,31 @@ test('topLevelNames นับเฉพาะที่คอลัมน์ 0', (
 test('เตือนถ้าไม่เจอ sessionStorage', () => {
   const { warnings } = check(page('<script>const a = 1;</script>'), { root: ROOT });
   assert.ok(warnings.some((w) => w.includes('sessionStorage')));
+});
+
+// ---------- กล่องแชทต้องรู้จักคำสั่งครบ ----------
+
+test('chatRoutesIn ดึงคำขึ้นต้นออกมาได้ และไม่หยิบค่าของ say มาด้วย', () => {
+  const html = `const CHAT_ROUTES = [
+  { p: 'ปิดงาน', say: 'ปิดงานให้แล้ว' },
+  { p: 'นัด', say: 'จดนัดให้แล้ว' },
+];`;
+  assert.deepEqual(chatRoutesIn(html), ['ปิดงาน', 'นัด']);
+});
+
+test('หา CHAT_ROUTES ไม่เจอ = ล้ม ไม่ใช่ผ่านเงียบ', () => {
+  assert.equal(chatRoutesIn('ไม่มีอะไรเลย'), null);
+  const bare = '<!doctype html><html><body><script>const a = 1;</script></body></html>';
+  const { errors } = check(bare, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('CHAT_ROUTES')));
+});
+
+test('ขาดคำสั่งที่เซิร์ฟเวอร์รับอยู่ ต้องแดง — บั๊ก "นัด" 30 ส.ค. 2026', () => {
+  // ตัดคำเดียวออกจากรายการจริง แล้วต้องได้ error ที่ชี้คำนั้นตรง ๆ
+  const real = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  assert.ok(chatRoutesIn(real).includes('นัด'), 'ไฟล์จริงต้องมี นัด อยู่แล้ว');
+
+  const broken = real.replace(/^.*p: 'นัด'.*$/m, '');
+  const { errors } = check(broken, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('นัด')), 'ตัด นัด ออกแล้วด่านต้องจับได้');
 });

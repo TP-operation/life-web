@@ -28,6 +28,12 @@ const EXTERNAL_HINTS = [
 ];
 
 /** ดึงเนื้อในของ <script> ที่ไม่มี src ออกมาพร้อมเลขบรรทัดที่เริ่ม */
+/**
+ * คำขึ้นต้นที่ life/scripts/issue-intake.mjs รับจริง (+ "สั่ง"/"ถาม" ที่ workflow แยกเอง)
+ * อยู่คนละ repo จึงอ่านตรง ๆ ไม่ได้ — เพิ่มที่นั่นแล้วต้องมาเพิ่มที่นี่
+ */
+const SERVER_PREFIXES = ['ออกกำลังกาย', 'ปิดงาน', 'เพิ่มงาน', 'โอที', 'ยืนยันงาน', 'ทิ้งงาน', 'นัด', 'สั่ง', 'ถาม'];
+
 export function inlineScripts(html) {
   const out = [];
   const re = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
@@ -84,6 +90,16 @@ export function idsUsed(html) {
 /** โดเมนทุกตัวที่ถูกอ้างถึงในไฟล์ */
 export function hostsIn(html) {
   return [...new Set([...html.matchAll(/https?:\/\/([A-Za-z0-9.-]+)/g)].map((m) => m[1]))];
+}
+
+/**
+ * คำขึ้นต้นที่กล่องแชทบนหน้าเว็บรู้จัก — ดึงจาก CHAT_ROUTES ในไฟล์จริง
+ * ไม่ได้ก็อปรายการมาไว้อีกชุด เพราะสองชุดจะหลุดจากกันวันหนึ่ง
+ */
+export function chatRoutesIn(html) {
+  const m = /const CHAT_ROUTES = \[([\s\S]*?)\];/.exec(String(html ?? ''));
+  if (!m) return null;
+  return [...m[1].matchAll(/[{,]\s*p:\s*'([^']+)'/g)].map((x) => x[1]);
 }
 
 export function check(html, { root = ROOT } = {}) {
@@ -158,6 +174,25 @@ export function check(html, { root = ROOT } = {}) {
 
   if (!/sessionStorage/.test(html)) {
     warnings.push('ไม่เจอ sessionStorage — โทเคนของคอมที่ทำงานต้องไม่ถูกเก็บถาวร (INVARIANTS §5.1)');
+  }
+
+  // ---- กล่องแชทต้องรู้จักคำสั่งครบตามที่ฝั่งเซิร์ฟเวอร์รับจริง ----
+  //
+  // ⚠️ 30 ส.ค. 2026 หน้าเว็บขาดคำว่า "นัด" ไปเงียบ ๆ ขณะที่ LINE มี
+  //    ผลคือพิมพ์ "นัด หมอฟัน 5 ก.ย." แล้วระบบ **จดลง วันนัด.md ถูกต้อง**
+  //    แต่ตอบกลับว่า "จดเข้ากล่องแล้ว เดี๋ยว Iris จัดให้เป็นงานเอง" ซึ่งผิด
+  //    เจ้าของอ่านแล้วจะคิดว่าสั่งไม่ได้ แล้วเลิกใช้ทั้งที่มันใช้ได้อยู่
+  //
+  //    แหล่งความจริงคือ life/scripts/issue-intake.mjs ซึ่งอยู่คนละ repo
+  //    ด่านนี้จึงถือรายการไว้เอง — เพิ่มคำสั่งใหม่ที่นั่นต้องมาเพิ่มที่นี่ด้วย
+  const routes = chatRoutesIn(html);
+  facts.chatRoutes = routes ? routes.length : 0;
+  if (!routes) {
+    errors.push('หา CHAT_ROUTES ในไฟล์ไม่เจอ — กล่องแชทจะตอบผิดทุกคำสั่ง');
+  } else {
+    for (const p of SERVER_PREFIXES) {
+      if (!routes.includes(p)) errors.push(`กล่องแชทไม่รู้จักคำว่า "${p}" ที่ฝั่งเซิร์ฟเวอร์รับอยู่ — จะตอบยืนยันผิด`);
+    }
   }
 
   return { errors, warnings, facts };
