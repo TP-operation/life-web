@@ -1112,6 +1112,12 @@ function loadAgentFlips() {
 
 /** ตัดคีย์ที่ไม่มีอยู่ในทะเบียนแล้วออก ไม่งั้นค่าที่จำไว้จะค้างสะสมไปเรื่อย ๆ */
 function pruneAgentFlips(validKeys) {
+  // ⚠️ ทะเบียนว่างไม่ได้แปลว่าไม่มี agent — แปลว่าอ่านทะเบียนไม่ได้ในรอบนี้
+  //    เช่นจังหวะที่ build-agents.mjs เขียนไฟล์ค้างครึ่งทาง
+  //    ถ้าล้างตามไปด้วย พอทะเบียนกลับมาปกติ การ์ดที่เจ้าของพลิกไว้จะหายหมด
+  //    ของที่จำไว้ต้องรอดจากรอบที่อ่านอะไรไม่ได้เสมอ
+  if (!validKeys || validKeys.size === 0) return loadAgentFlips();
+
   const kept = {};
   for (const k of Object.keys(loadAgentFlips())) {
     if (validKeys.has(k)) kept[k] = true;
