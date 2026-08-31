@@ -11,6 +11,9 @@ import {
   chatRoutesIn,
 } from './checks.mjs';
 
+/** จุดจบของฟังก์ชันที่คอลัมน์ 0 — เขียนแบบนี้เพื่อเลี่ยง escape ในสคริปต์ที่สร้างไฟล์นี้ */
+const NL_BRACE = String.fromCharCode(10) + '}';
+
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const REAL = readFileSync(`${ROOT}index.html`, 'utf8');
 
@@ -158,4 +161,53 @@ test('ขาดคำสั่งที่เซิร์ฟเวอร์ร�
   const broken = real.replace(/^.*p: 'นัด'.*$/m, '');
   const { errors } = check(broken, { root: ROOT });
   assert.ok(errors.some((e) => e.includes('นัด')), 'ตัด นัด ออกแล้วด่านต้องจับได้');
+});
+
+// ---------- ใครเป็นคนตอบในกล่องแชท ----------
+
+/**
+ * ดึงฟังก์ชันจากไฟล์จริง ไม่ใช่ก็อปมาไว้อีกชุด — สองชุดจะหลุดจากกันวันหนึ่ง
+ * ตัดด้วยการหาตำแหน่ง ไม่ใช้ regex เพราะรูปแบบฟังก์ชันสำคัญน้อยกว่าความชัดเจน
+ */
+function fnFromPage(name) {
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const head = `function ${name}(`;
+  const a = html.indexOf(head);
+  assert.notEqual(a, -1, `หา ${name} ในไฟล์จริงไม่เจอ`);
+  const end = html.indexOf(NL_BRACE, a);
+  assert.notEqual(end, -1, `หาจุดจบของ ${name} ไม่เจอ`);
+  const src = html.slice(a, end + NL_BRACE.length);
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}` + '; return ' + name + ';')();
+}
+const REG = {
+  agents: [
+    { name: 'Ada', prefix: 'ถาม ', portrait: 'ada.jpg' },
+    { name: 'Ray', prefix: 'สั่ง ', portrait: 'ray.jpg' },
+    { name: 'Cora', prefix: null, portrait: 'cora.jpg' },
+    { name: null, prefix: null, portrait: null },
+  ],
+};
+
+test('รู้ว่าใครตอบจากคำขึ้นต้นของหัวข้อ', () => {
+  const agentFor = fnFromPage('agentFor');
+  assert.equal(agentFor('ถาม หม้อแปลงไหม้', REG).name, 'Ada');
+  assert.equal(agentFor('สั่ง EBR ทำ M1c-5', REG).name, 'Ray');
+});
+
+test('เรื่องที่ไม่มีคำขึ้นต้น = สคริปต์จัดการ ไม่มีหน้าโดยตั้งใจ', () => {
+  const agentFor = fnFromPage('agentFor');
+  assert.equal(agentFor('ซื้อของเข้าบ้าน', REG), null);
+  assert.equal(agentFor('', REG), null);
+});
+
+test('ไม่มีทะเบียนก็ไม่พัง แค่ไม่มีรูป', () => {
+  const agentFor = fnFromPage('agentFor');
+  assert.equal(agentFor('ถาม อะไรก็ได้', null), null);
+  assert.equal(agentFor('ถาม อะไรก็ได้', { agents: [] }), null);
+});
+
+test('agent ที่ไม่มี prefix ต้องไม่ถูกจับคู่กับอะไรทั้งนั้น', () => {
+  const agentFor = fnFromPage('agentFor');
+  assert.equal(agentFor('อาทิตย์', REG), null, 'Cora ไม่ได้ตื่นจากคำขึ้นต้น');
 });

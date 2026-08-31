@@ -192,7 +192,14 @@
   .chatlog:empty{display:none}
   .msg{display:flex; flex-direction:column; max-width:88%}
   .msg.me{align-self:flex-end; align-items:flex-end}
-  .msg.them{align-self:flex-start; align-items:flex-start}
+  .msg.them{align-self:flex-start; align-items:flex-start; flex-direction:row; gap:8px; max-width:94%}
+  .msg.them .mb{display:flex; flex-direction:column; align-items:flex-start; min-width:0}
+  .msg .av{width:34px; height:34px; border-radius:50%; object-fit:cover; flex:none;
+           background:var(--card2, rgba(127,127,127,.14)); margin-top:16px}
+  .msg .av.gap{background:none}
+  .msg .av.letter{display:flex; align-items:center; justify-content:center;
+                  font-weight:700; font-size:.78rem; opacity:.65}
+  .msg .who{font-size:.7rem; opacity:.7; margin:0 4px 3px}
   .msg .bub{padding:9px 12px; border-radius:14px; line-height:1.5; font-size:.86rem;
             white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; max-width:100%}
   .msg.me .bub{background:var(--accent); color:#fff; border-bottom-right-radius:5px}
@@ -1101,6 +1108,37 @@ const agentsState = {
 
 const agentKey = (repo, workflow) => `${repo}::${workflow}`;
 
+/**
+ * ทะเบียน agent — ใช้ทั้งแท็บ agent และกล่องแชท
+ * แทบไม่เปลี่ยน (เปลี่ยนตอน daily-plan รันเท่านั้น) จึงถามซ้ำได้ไม่บ่อย
+ */
+async function loadRegistry(token) {
+  const now = Date.now();
+  if (agentsState.registry && now - agentsState.registryAt <= REGISTRY_EVERY) return agentsState.registry;
+  const reg = await ghJson(
+    `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}?ref=${STATE_REF}`,
+    token, 'application/vnd.github.raw+json',
+  );
+  agentsState.registry = reg;
+  agentsState.registryAt = now;
+  return reg;
+}
+
+/**
+ * ใครเป็นคนตอบในเรื่องนี้
+ *
+ * ดูจากฟิลด์ `prefix` ในทะเบียน ไม่ใช่ฝังชื่อ agent ไว้ในหน้าเว็บ
+ * วันที่เพิ่ม agent ตัวใหม่ที่ตื่นจากคำขึ้นต้น หน้านี้จะรู้จักเองโดยไม่ต้องแก้
+ * (build-agents.mjs มีด่านบังคับว่า trigger กับ prefix ต้องตรงกัน)
+ *
+ * สคริปต์ไม่มีชื่อและไม่มีหน้าโดยตั้งใจ — คอมเมนต์ของสคริปต์จึงไม่มีรูป
+ * ซึ่งถูกแล้ว ชื่อกับหน้ามีไว้เตือนว่ามีการตัดสินใจของโมเดลเกิดขึ้นตรงนั้น
+ */
+function agentFor(issueTitle, registry) {
+  const t = String(issueTitle ?? '');
+  return (registry?.agents ?? []).find((a) => a.name && a.prefix && t.startsWith(a.prefix)) ?? null;
+}
+
 // จำไว้ว่าการ์ดไหนพลิกอยู่ — คีย์คือ repo::workflow ไม่ใช่ลำดับการ์ด เพราะลำดับ
 // เปลี่ยนได้ทุกครั้งที่มีตัวไหนกำลังรัน (มันขึ้นบนสุดตาม section() ด้านล่าง)
 const AGENT_FLIPS_KEY = 'life_agent_flips';
@@ -1214,20 +1252,13 @@ async function loadAgents({ quiet = false } = {}) {
 
   // ทะเบียนมาก่อน — ถ้าไม่มีทะเบียนก็ไม่รู้ว่าตัวไหนคือใคร
   // แต่มันแทบไม่เปลี่ยน (เปลี่ยนตอน daily-plan รันเท่านั้น) จึงไม่ต้องถามทุกรอบ
-  let registry = agentsState.registry;
   let regError = null;
-  if (!registry || now - agentsState.registryAt > REGISTRY_EVERY) {
-    try {
-      registry = await ghJson(
-        `https://api.github.com/repos/${REPO}/contents/${AGENTS_PATH}?ref=${STATE_REF}`,
-        token, 'application/vnd.github.raw+json',
-      );
-      agentsState.registry = registry;
-      agentsState.registryAt = now;
-    } catch (e) {
-      regError = e.status ?? e.message;
-      registry = agentsState.registry;   // ของเก่ายังดีกว่าไม่มีอะไรเลย
-    }
+  let registry = null;
+  try {
+    registry = await loadRegistry(token);
+  } catch (e) {
+    regError = e.status ?? e.message;
+    registry = agentsState.registry;   // ของเก่ายังดีกว่าไม่มีอะไรเลย
   }
 
   // repo ของบัญชีอื่นถูกถามได้ แต่**ไม่ส่งโทเคนไปด้วยเด็ดขาด** (INVARIANTS §8.5)
@@ -2175,7 +2206,11 @@ async function loadChat() {
         token, 'application/vnd.github+json'),
     ]);
 
+    // ทะเบียนบอกว่าใครเป็นคนตอบ · อ่านไม่ได้ก็แค่ไม่มีรูป ไม่ใช่เหตุให้แชทพัง
+    const registry = await loadRegistry(token).catch(() => agentsState.registry);
+
     const mine = (Array.isArray(issues) ? issues : []).filter((it) => !it.pull_request);
+    const titleOf = new Map(mine.map((it) => [it.number, it.title ?? '']));
     const nums = new Set(mine.map((it) => it.number));
     const waiting = new Set(mine
       .filter((it) => (it.labels ?? []).some((l) => (l.name ?? l) === LABEL_WAIT))
@@ -2198,11 +2233,13 @@ async function loadChat() {
       const num = Number(String(c.issue_url ?? '').split('/').pop());
       if (!nums.has(num)) continue;
       const byMe = String(c.user?.login ?? '').toLowerCase() === OWNER;
+      const who = byMe ? null : agentFor(titleOf.get(num), registry);
       ev.push({
         at: c.created_at, me: byMe, num,
         // ของเจ้าของมีหมายเหตุที่เราต่อท้ายเอง ตัดออกให้เหมือนตอนพิมพ์
         text: byMe ? stripPicMarks(stripMark(c.body)) : String(c.body ?? ''),
         q: (!byMe && waiting.has(num)) ? parseQuestion(c.body) : null,
+        who,
       });
     }
     // เรื่องที่คุยค้างอยู่ = issue ที่ขึ้นต้นด้วย "ถาม " ใบใหม่สุด
@@ -2245,10 +2282,28 @@ function renderChat(ev) {
              <button class="qsend" type="button" data-issue="${esc(String(e.num))}">ส่ง</button>
            </span>`
       : '';
-    return `<div class="msg ${e.me ? 'me' : 'them'}">
-        <span class="bub">${mdLite(e.text)}${opts}<span class="qmsg"></span></span>
-        <span class="tm">#${esc(String(e.num))} · ${esc(fmtAgo(e.at))}</span>
-      </div>`;
+    // ฝั่ง agent มีรูปกับชื่อเหมือนแชทไลน์ ฝั่งเราไม่ต้องมี — เรารู้อยู่แล้วว่าเป็นเรา
+    // สคริปต์ไม่มีชื่อและไม่มีหน้าโดยตั้งใจ คอมเมนต์ของสคริปต์จึงขึ้นเป็นฟองเปล่า ๆ
+    const inner = `<span class="bub">${mdLite(e.text)}${opts}<span class="qmsg"></span></span>`
+      + `<span class="tm">#${esc(String(e.num))} · ${esc(fmtAgo(e.at))}</span>`;
+    if (e.me) return `<div class="msg me">${inner}</div>`;
+
+    // ⚠️ ฟองฝั่งซ้ายทุกอันต้องมีโครงเดียวกัน
+    //    .msg.them จัดลูกเป็นแนวนอน ถ้าตัวไหนไม่มีชั้น .mb ครอบ
+    //    เวลาจะไปอยู่ข้างฟองแทนที่จะอยู่ใต้ และข้อความจะไม่ตรงแนวกับอันอื่น
+    //    ตัวที่ไม่มีหน้าใช้ที่ว่างขนาดเท่ารูปแทน จะได้เรียงตรงกัน
+    if (!e.who) {
+      return `<div class="msg them"><span class="av gap"></span><div class="mb">${inner}</div></div>`;
+    }
+    const first = esc(String(e.who.name ?? '?')[0]);
+    const av = e.who.portrait
+      ? `<img class="av" src="portraits/${esc(e.who.portrait)}" alt="${esc(e.who.name)}"
+           onerror="this.replaceWith(Object.assign(document.createElement('span'),
+             {className:'av letter',textContent:'${first}'}))">`
+      : `<span class="av letter">${first}</span>`;
+    return `<div class="msg them">${av}<div class="mb">
+        <span class="who">${esc(e.who.name)}</span>${inner}
+      </div></div>`;
   }).join('');
   const pend = chatState.pending.map((t) =>
     `<div class="msg me pend"><span class="bub">${mdLite(t)}</span><span class="tm">กำลังส่ง…</span></div>`).join('');
