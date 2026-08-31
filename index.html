@@ -369,7 +369,8 @@
 
 <!-- ตั้งค่า token — ไม่มี token ฝังในหน้านี้ ผู้ใช้กรอกเองเสมอ (INVARIANTS §5.2) -->
 <section class="card" id="setup">
-  <label for="pat">GitHub token (fine-grained · สิทธิ์ Contents: read ของ repo life)</label>
+  <label for="pat">GitHub token (fine-grained · repo life — Contents: <b>read and write</b> · Issues: read and write)</label>
+  <div class="muted" style="font-size:12px;margin:-4px 0 6px">Contents ต้องเป็น read and write เฉพาะตอนแนบรูป · อย่างอื่นแค่ read ก็พอ</div>
   <input id="pat" type="password" autocomplete="off" placeholder="github_pat_...">
   <div class="row" style="margin:10px 0">
     <label style="font-weight:400; margin:0">
@@ -443,9 +444,12 @@
     <button type="button" data-p="โอที ">โอที</button>
   </div>
   <textarea id="chatInput" rows="2" placeholder="พิมพ์อะไรก็ได้ — Iris จัดให้เป็นงานเอง"></textarea>
+  <div id="chatPics" class="muted" style="margin-top:6px;font-size:13px"></div>
   <div class="row" style="margin-top:8px">
+    <button type="button" id="chatPicBtn" title="แนบรูป">แนบรูป</button>
     <button class="primary" id="chatSend" style="flex:1">ส่ง</button>
   </div>
+  <input id="chatPicFile" type="file" accept="image/*" multiple hidden>
 </section>
 
 <!-- ปฏิทิน — งานที่มีกำหนดส่งกับวันพิเศษ วางบนตารางเดือน
@@ -1998,6 +2002,136 @@ const chatState = { timer: null, loaded: false, sentAt: 0, pending: [] };
  * ข้อความนี้เป็นการต่อเรื่องเดิม (`ตอบ`) หรือเปิดเรื่องใหม่
  * ตรรกะเดียวกับ isReply() ใน Code.gs — มีเทสฝั่งนั้นคุมไว้
  */
+// ── รูปที่แนบมากับข้อความ ───────────────────────────────
+//
+// 31 ส.ค. 2026 เจ้าของอยากให้ Ada ดูรูปหม้อแปลงที่ไหม้ ส่งลิงก์ SharePoint มา
+// แต่เปิดไม่ได้เพราะต้องล็อกอินบัญชีโรงงาน (issue #99) จึงต้องบรรยายรูปเป็นคำแทน
+//
+// รูปไปอยู่บน branch `media` ของ repo private ซึ่งแยกจาก main และ state โดยตั้งใจ
+//   main  ถูก sync ลงมือถือด้วย obsidian-git — รูปที่นั่นจะโหลดลงมือถือทุกครั้ง
+//   state ถูก restore โดยเกือบทุก workflow — รูปที่นั่นทำให้ทุกรอบช้าลงหมด
+// แล้ว ask.yml ลบรูปทิ้งทันทีที่ตอบเสร็จ ถ้าไม่เหลือรูปเลยจะลบทั้ง branch
+//
+// ⚠️ ว่ารูปไหนส่งได้ไม่ได้ **ไม่มีเครื่องไหนตัดสินแทนได้** (INVARIANTS §1.7)
+//    ด่านทุกตัวของระบบอ่านตัวหนังสือ รูปผ่านหมด
+
+const PIC_MAX = 3;             // ต่อหนึ่งข้อความ
+const PIC_EDGE = 1600;         // ด้านยาวสุดหลังย่อ — พอสำหรับอ่านป้ายพิกัดบนอุปกรณ์
+const PIC_BYTES = 900 * 1024;  // เพดานหลังย่อ ถ้าเกินจะลดคุณภาพลงอีกชั้น
+
+const picState = { files: [] };
+
+/**
+ * ย่อรูปในเบราว์เซอร์ก่อนส่ง
+ *
+ * รูปจากมือถือใบหนึ่งมักเกิน 3 MB ซึ่งเปลืองทั้งตอนอัปจากคอมที่ทำงาน
+ * และตอนที่ workflow ดึงกลับมา · 1600px คือจุดที่ยังอ่านตัวหนังสือบนป้ายเครื่องออก
+ * คืนค่าเป็น base64 ล้วน ไม่มีส่วนหัว data: เพราะ GitHub รับแบบนั้น
+ */
+async function shrinkPic(file, edge = PIC_EDGE, quality = 0.82) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => {
+      const im = new Image();
+      im.onload = () => ok(im);
+      im.onerror = () => no(new Error('เปิดรูปไม่ได้'));
+      im.src = url;
+    });
+    const scale = Math.min(1, edge / Math.max(img.width, img.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(img.width * scale);
+    cv.height = Math.round(img.height * scale);
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+
+    let q = quality;
+    let out = cv.toDataURL('image/jpeg', q).split(',')[1];
+    // ลดคุณภาพลงจนกว่าจะพอดี ดีกว่าปฏิเสธรูปที่เจ้าของอุตส่าห์ถ่ายมา
+    while (out.length * 0.75 > PIC_BYTES && q > 0.4) {
+      q -= 0.15;
+      out = cv.toDataURL('image/jpeg', q).split(',')[1];
+    }
+    return out;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function renderPics() {
+  const el = $('chatPics');
+  if (!el) return;
+  el.innerHTML = picState.files.length
+    ? picState.files.map((f, i) =>
+      `แนบ ${esc(f.name)} <button type="button" class="picdel" data-i="${i}">เอาออก</button>`).join(' · ')
+    : '';
+}
+
+function addPics(list) {
+  for (const f of list) {
+    if (!/^image\//.test(f.type)) continue;
+    if (picState.files.length >= PIC_MAX) {
+      $('chatNote').textContent = `แนบได้สูงสุด ${PIC_MAX} รูปต่อข้อความ`;
+      break;
+    }
+    picState.files.push(f);
+  }
+  renderPics();
+}
+
+/**
+ * สร้าง branch media ถ้ายังไม่มี
+ *
+ * ask.yml ลบทั้ง branch ทิ้งทุกครั้งที่ไม่เหลือรูปค้าง ปกติมันจึง **ไม่มีอยู่**
+ * การสร้างใหม่จึงเป็นเรื่องปกติ ไม่ใช่กรณีพิเศษ · 422 = มีอยู่แล้ว ไม่ใช่ความผิดพลาด
+ */
+async function ensureMediaBranch(token) {
+  const head = await ghJson(`https://api.github.com/repos/${REPO}/git/ref/heads/main`,
+    token, 'application/vnd.github+json');
+  const res = await fetch(`https://api.github.com/repos/${REPO}/git/refs`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ref: 'refs/heads/media', sha: head.object.sha }),
+  });
+  if (!res.ok && res.status !== 422) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+}
+
+/** อัปรูปทั้งหมดขึ้น branch media แล้วคืน path ที่ใช้อ้างถึงมัน */
+async function uploadPics(token) {
+  if (!picState.files.length) return [];
+  await ensureMediaBranch(token);
+  const stamp = Date.now();
+  const paths = [];
+  for (let i = 0; i < picState.files.length; i += 1) {
+    const content = await shrinkPic(picState.files[i]);
+    const path = `chat/${stamp}-${i + 1}.jpg`;
+    const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: `รูปแนบจากแชท ${path}`, content, branch: 'media' }),
+    });
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+    paths.push(path);
+  }
+  return paths;
+}
+
+/** ป้ายที่ฝังในเนื้อ — ต้องตรงกับ RE ใน scripts/chat-images.mjs */
+const picMark = (path) => `<!-- img: ${path} -->`;
+
+/** ตัดป้ายรูปออกจากข้อความที่เอาไปแสดง คนไม่ได้พิมพ์บรรทัดนี้ */
+function stripPicMarks(text) {
+  const n = (String(text ?? '').match(/<!--\s*img:/g) || []).length;
+  const clean = String(text ?? '').replace(/<!--\s*img:[^>]*-->/g, '').trim();
+  return n ? `${clean}\n\n📎 แนบรูป ${n} รูป` : clean;
+}
+
 function isReplyText(text) {
   return String(text ?? '').trim().startsWith('ตอบ');
 }
@@ -2054,7 +2188,7 @@ async function loadChat() {
         // เนื้อเก็บข้อความเต็มอยู่แล้วทั้งทางหน้าเว็บและทาง LINE จึงใช้เนื้อก่อน
         // หัวข้อถูกตัดที่ 80 ตัว เอามาแสดงจะได้ข้อความที่ขาดกลางคัน
         // ของเก่าก่อน 26 ส.ค. 2026 เนื้อว่าง จึงต้องมีทางถอยไปใช้หัวข้อ
-        text: stripMark(it.body) || it.title,
+        text: stripPicMarks(stripMark(it.body)) || it.title,
       });
     }
     // ⚠️ ไม่ใช่ทุกคอมเมนต์เป็นของ agent อีกต่อไป — ตั้งแต่มี `ตอบ` เจ้าของก็คอมเมนต์เอง
@@ -2067,7 +2201,7 @@ async function loadChat() {
       ev.push({
         at: c.created_at, me: byMe, num,
         // ของเจ้าของมีหมายเหตุที่เราต่อท้ายเอง ตัดออกให้เหมือนตอนพิมพ์
-        text: byMe ? stripMark(c.body) : String(c.body ?? ''),
+        text: byMe ? stripPicMarks(stripMark(c.body)) : String(c.body ?? ''),
         q: (!byMe && waiting.has(num)) ? parseQuestion(c.body) : null,
       });
     }
@@ -2193,6 +2327,22 @@ async function sendChat() {
     return;
   }
 
+  // อัปรูปก่อนเสมอ ถ้าอัปไม่ผ่านต้องไม่ส่งข้อความที่อ้างถึงรูปที่ไม่มีอยู่จริง
+  let marks = '';
+  try {
+    marks = (await uploadPics(token)).map(picMark).join('\n');
+  } catch (e) {
+    chatState.pending = chatState.pending.filter((t) => t !== text);
+    const code = String(e.status ?? e.message);
+    $('chatNote').innerHTML = (code === '403' || code === '404')
+      ? '<strong>โทเคนนี้อัปรูปไม่ได้</strong> — ต้องมีสิทธิ์ Contents: Read and write'
+      : `อัปรูปไม่สำเร็จ — ${esc(code)}`;
+    box.value = text;
+    btn.disabled = false;
+    return;
+  }
+  const tail = marks ? `\n\n${marks}` : '';
+
   const url = reply
     ? `https://api.github.com/repos/${REPO}/issues/${chatState.lastAsk}/comments`
     : `https://api.github.com/repos/${REPO}/issues`;
@@ -2208,7 +2358,7 @@ async function sendChat() {
       body: JSON.stringify(reply ? {
         // คอมเมนต์ไม่มีหัวข้อ และต้องขึ้นต้นด้วย `ตอบ ` มีเว้นวรรคเสมอ
         // เพราะ ask.yml ตื่นเมื่อ startsWith(comment.body, 'ตอบ ') เท่านั้น
-        body: `${replyBodyOf(text)}\n\n---\n${CHAT_MARK}`,
+        body: `${replyBodyOf(text)}${tail}\n\n---\n${CHAT_MARK}`,
       } : {
         // ⚠️ เนื้อต้องเป็นข้อความเต็มเสมอ ไม่ใช่แค่บรรทัดที่เหลือ
         //    หัวข้อถูกตัดที่ 80 ตัวเพราะ GitHub แสดงได้เท่านั้น ถ้าเนื้อเก็บแค่ที่เหลือ
@@ -2216,7 +2366,7 @@ async function sendChat() {
         //    เกิดขึ้นจริงกับ issue #54 และ #65 เมื่อ 26 ส.ค. 2026 สองครั้งติด
         //    แล้ว Iris ต้องนั่งเดาว่าคำที่ขาดคืออะไร
         title: lines[0].slice(0, 80),
-        body: `${text}\n\n---\n${CHAT_MARK}`,
+        body: `${text}${tail}\n\n---\n${CHAT_MARK}`,
       }),
     });
     chatState.pending = chatState.pending.filter((t) => t !== text);
@@ -2227,6 +2377,8 @@ async function sendChat() {
       box.value = text;   // ข้อความที่พิมพ์แล้วห้ามหายเพราะส่งไม่ผ่าน
       return;
     }
+    picState.files = [];
+    renderPics();
     chatState.sentAt = Date.now();
     $('chatNote').textContent = sayForChat(text);
     await loadChat();
@@ -2539,6 +2691,24 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// แนบรูป — ผูกครั้งเดียวตอนโหลด **ห้ามไปอยู่ใน showTab**
+// showTab ถูกเรียกทุกครั้งที่สลับแท็บ ถ้าผูก addEventListener ที่นั่น
+// จะได้ listener ซ้อนเพิ่มขึ้นเรื่อย ๆ แล้วรูปเดียวถูกแนบหลายรอบ
+// แนบรูป — กดปุ่ม เลือกไฟล์ หรือวางจากคลิปบอร์ดก็ได้
+// วางได้สำคัญกว่าที่คิด เพราะที่ทำงานเจ้าของแคปหน้าจอบ่อยกว่าเปิดไฟล์
+$('chatPicBtn').onclick = () => $('chatPicFile').click();
+$('chatPicFile').onchange = (e) => { addPics(e.target.files); e.target.value = ''; };
+$('chatInput').addEventListener('paste', (e) => {
+  const f = [...(e.clipboardData?.files ?? [])];
+  if (f.length) { e.preventDefault(); addPics(f); }
+});
+$('chatPics').onclick = (e) => {
+  const b = e.target.closest('.picdel');
+  if (!b) return;
+  picState.files.splice(Number(b.dataset.i), 1);
+  renderPics();
+};
+
 function showTab(name) {
   const tab = TABS[name] ? name : 'today';
   for (const [key, ids] of Object.entries(TABS)) {
@@ -2548,7 +2718,6 @@ function showTab(name) {
     }
   }
   $('chatSend').onclick = sendChat;
-
 // Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ — เหมือนแอปแชททั่วไป
 // แต่บนมือถือปล่อยให้ Enter ขึ้นบรรทัดใหม่ตามปกติ เพราะไม่มีปุ่ม Shift ให้กด
 $('chatInput').onkeydown = (e) => {
