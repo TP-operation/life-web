@@ -1982,6 +1982,7 @@ const CHAT_ROUTES = [
   { p: 'ยืนยันงาน', say: 'ยืนยันงานให้แล้ว' },
   { p: 'ทิ้งงาน', say: 'ทิ้งงานให้แล้ว' },
   { p: 'นัด', say: 'จดนัดให้แล้ว' },
+  { p: 'ตอบ', say: 'ต่อให้ในเรื่องเดิมแล้ว' },
   { p: 'ถาม', say: 'ส่งคำถามให้ agent แล้ว เดี๋ยวตอบกลับมา' },
   { p: 'สั่ง', say: 'กำลังหาว่าเป็นงานของโปรเจคไหน' },
 ];
@@ -1992,6 +1993,27 @@ const CHAT_TICK_IDLE = 60000;
 const CHAT_LIVE_FOR = 300000;   // นับว่ายังรออยู่ห้านาทีหลังส่ง
 
 const chatState = { timer: null, loaded: false, sentAt: 0, pending: [] };
+
+/**
+ * ข้อความนี้เป็นการต่อเรื่องเดิม (`ตอบ`) หรือเปิดเรื่องใหม่
+ * ตรรกะเดียวกับ isReply() ใน Code.gs — มีเทสฝั่งนั้นคุมไว้
+ */
+function isReplyText(text) {
+  return String(text ?? '').trim().startsWith('ตอบ');
+}
+
+/**
+ * บังคับให้คอมเมนต์ขึ้นต้นด้วย `ตอบ ` **มีเว้นวรรค** เสมอ
+ *
+ * ⚠️ ask.yml ตื่นเมื่อ startsWith(comment.body, 'ตอบ ') เท่านั้น
+ *    ถ้าพิมพ์ "ตอบว่าใช่" ติดกันแล้วส่งไปดิบ ๆ หน้าเว็บจะบอกว่าส่งแล้ว
+ *    แต่ agent ไม่ตื่น — คือเงียบหายแบบที่แย่ที่สุด (INVARIANTS §6.4)
+ */
+function replyBodyOf(text) {
+  const t = String(text ?? '').trim();
+  const rest = t.startsWith('ตอบ') ? t.slice('ตอบ'.length).trim() : t;
+  return `ตอบ ${rest}`;
+}
 
 function sayForChat(text) {
   const t = String(text ?? '').trim();
@@ -2035,14 +2057,25 @@ async function loadChat() {
         text: stripMark(it.body) || it.title,
       });
     }
+    // ⚠️ ไม่ใช่ทุกคอมเมนต์เป็นของ agent อีกต่อไป — ตั้งแต่มี `ตอบ` เจ้าของก็คอมเมนต์เอง
+    //    ถ้าเหมาว่าเป็นของ agent ทั้งหมด ข้อความที่เจ้าของเพิ่งพิมพ์จะไปโผล่ฝั่ง Ada
+    const OWNER = REPO.split('/')[0].toLowerCase();
     for (const c of (Array.isArray(comments) ? comments : [])) {
       const num = Number(String(c.issue_url ?? '').split('/').pop());
       if (!nums.has(num)) continue;
+      const byMe = String(c.user?.login ?? '').toLowerCase() === OWNER;
       ev.push({
-        at: c.created_at, me: false, num, text: String(c.body ?? ''),
-        q: waiting.has(num) ? parseQuestion(c.body) : null,
+        at: c.created_at, me: byMe, num,
+        // ของเจ้าของมีหมายเหตุที่เราต่อท้ายเอง ตัดออกให้เหมือนตอนพิมพ์
+        text: byMe ? stripMark(c.body) : String(c.body ?? ''),
+        q: (!byMe && waiting.has(num)) ? parseQuestion(c.body) : null,
       });
     }
+    // เรื่องที่คุยค้างอยู่ = issue ที่ขึ้นต้นด้วย "ถาม " ใบใหม่สุด
+    // เก็บไว้ตอนนี้เลย จะได้ไม่ต้องยิงถาม GitHub ซ้ำตอนกดส่ง
+    // (mine เรียงใหม่สุดก่อนอยู่แล้วเพราะขอมาแบบ direction=desc)
+    chatState.lastAsk = mine.find((it) => String(it.title ?? '').startsWith('ถาม '))?.number ?? null;
+
     ev.sort((a, b) => new Date(a.at) - new Date(b.at));
 
     renderChat(ev.slice(-40));
@@ -2147,15 +2180,36 @@ async function sendChat() {
   renderChat(chatState.ev ?? []);
 
   const lines = text.split('\n');
+
+  // `ตอบ` = ต่อเรื่องเดิม ไม่ใช่เปิดเรื่องใหม่ — ตรรกะเดียวกับบอทฝั่ง nse
+  // ต้องตัดสินก่อนยิง ไม่งั้นคำตอบกลายเป็นเรื่องใหม่ที่ไม่ผูกกับของเดิม
+  // แล้ว agent เริ่มจากศูนย์อีกรอบ (เรื่องหม้อแปลง 31 ส.ค. 2026 = 7 ใบ เริ่มใหม่ 7 ครั้ง)
+  const reply = isReplyText(text);
+  if (reply && !chatState.lastAsk) {
+    chatState.pending = chatState.pending.filter((t) => t !== text);
+    $('chatNote').textContent = 'ยังไม่มีเรื่องที่คุยค้างอยู่ — ขึ้นต้นด้วย ถาม เพื่อเปิดเรื่องใหม่';
+    box.value = text;
+    btn.disabled = false;
+    return;
+  }
+
+  const url = reply
+    ? `https://api.github.com/repos/${REPO}/issues/${chatState.lastAsk}/comments`
+    : `https://api.github.com/repos/${REPO}/issues`;
+
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/issues`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
+      body: JSON.stringify(reply ? {
+        // คอมเมนต์ไม่มีหัวข้อ และต้องขึ้นต้นด้วย `ตอบ ` มีเว้นวรรคเสมอ
+        // เพราะ ask.yml ตื่นเมื่อ startsWith(comment.body, 'ตอบ ') เท่านั้น
+        body: `${replyBodyOf(text)}\n\n---\n${CHAT_MARK}`,
+      } : {
         // ⚠️ เนื้อต้องเป็นข้อความเต็มเสมอ ไม่ใช่แค่บรรทัดที่เหลือ
         //    หัวข้อถูกตัดที่ 80 ตัวเพราะ GitHub แสดงได้เท่านั้น ถ้าเนื้อเก็บแค่ที่เหลือ
         //    ข้อความที่พิมพ์ยาวรวดเดียวบรรทัดเดียวจะหายทันทีตั้งแต่ตัวที่ 81
@@ -2168,7 +2222,7 @@ async function sendChat() {
     chatState.pending = chatState.pending.filter((t) => t !== text);
     if (!res.ok) {
       $('chatNote').innerHTML = (res.status === 403 || res.status === 404)
-        ? '<strong>โทเคนนี้เปิด issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
+        ? '<strong>โทเคนนี้เขียน issue ไม่ได้</strong> — ต้องมีสิทธิ์ Issues: Read and write'
         : `ส่งไม่สำเร็จ — GitHub ตอบกลับ ${res.status}`;
       box.value = text;   // ข้อความที่พิมพ์แล้วห้ามหายเพราะส่งไม่ผ่าน
       return;
