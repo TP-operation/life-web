@@ -204,6 +204,14 @@
             white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; max-width:100%}
   .msg.me .bub{background:var(--accent); color:#fff; border-bottom-right-radius:5px}
   .msg.them .bub{background:var(--card2, rgba(127,127,127,.14)); border-bottom-left-radius:5px}
+  .portbar{display:flex; height:8px; border-radius:5px; overflow:hidden; background:var(--card2, rgba(127,127,127,.14))}
+  .portbar .seg{display:block; height:100%}
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:middle; margin-right:3px}
+  .s0{background:#3b82f6} .s1{background:#f59e0b} .s2{background:#10b981} .s3{background:#a855f7} .s4{background:#ef4444}
+  table.port{width:100%; margin-top:8px; border-collapse:collapse; font-size:.78rem}
+  table.port td{padding:3px 0; border-top:1px solid var(--card2, rgba(127,127,127,.14))}
+  table.port td.num{text-align:right; font-variant-numeric:tabular-nums}
+  .up{color:#16a34a} .down{color:#dc2626}
   .msg.pend{opacity:.55}
   .msg .tm{margin:2px 4px 0; font-size:.68rem; opacity:.6}
   .msg .bub code{font-size:.92em}
@@ -391,6 +399,17 @@
 
 <section id="status"></section>
 
+<!-- พอร์ตการลงทุน — ภาพถ่ายที่เจ้าของจดเอง ไม่ใช่ราคาสด
+     แอปโบรกเกอร์บอกมูลค่าสดอยู่แล้ว งานของการ์ดนี้คือเอามาวางข้าง ๆ วันของเรา
+     กำกับวันที่ไว้เสมอ ห้ามทำให้ดูเหมือนราคาปัจจุบัน -->
+<section class="card hidden" id="portBox">
+  <div class="row" style="justify-content:space-between">
+    <strong>พอร์ต</strong>
+    <span class="muted" id="portAt"></span>
+  </div>
+  <div id="portBody"></div>
+</section>
+
 <section class="card hidden" id="plan">
   <div class="row" style="justify-content:space-between">
     <strong id="dayLabel"></strong>
@@ -521,6 +540,7 @@ const STATE_REF = 'state';
 const PATH = 'state/today.json';
 const WEEK_PATH = 'state/week.json';
 const PROJECTS_PATH = 'state/projects.json';
+const PORT_PATH = 'state/portfolio.json';
 const KEY  = 'life_pat';
 const TREND_LABEL = '8 สัปดาห์ล่าสุด';
 
@@ -567,6 +587,7 @@ async function load() {
   render(data);
   loadWeek(token);
   loadProjects(token);
+  loadPortfolio(token);
 }
 
 // สรุปสัปดาห์เป็นของเสริม — ถ้ายังไม่มีไฟล์ก็ไม่ต้องรบกวนหน้าจอ
@@ -579,6 +600,108 @@ async function loadWeek(token) {
     if (!res.ok) return;
     renderWeek(JSON.parse(await res.text()));
   } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+// ---------- พอร์ตการลงทุน ----------
+//
+// ⚠️ ไม่ใช่ราคาสด และตั้งใจไม่ใช่
+//    เจ้าของจดสถานะเป็นครั้ง ๆ ใน พอร์ต.md แล้ว portfolio.mjs สรุปให้
+//    การ์ดนี้จึงต้อง **กำกับวันที่เสมอ** ห้ามทำให้ดูเหมือนมูลค่าปัจจุบัน
+//    ดึงราคาสดจากเบราว์เซอร์ทำไม่ได้อยู่แล้ว เพราะหน้านี้ยิงออกได้แค่ api.github.com
+//    ซึ่งเป็นกฎที่มีไว้กัน PAT หลุด
+//
+// ⚠️ ห้ามมีคำแนะนำให้ซื้อหรือขายในนี้ ไม่ว่ารูปแบบใด — แสดงสถานะกับสัดส่วนเท่านั้น
+
+async function loadPortfolio(token) {
+  try {
+    const res = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + PORT_PATH + '?ref=' + STATE_REF, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) return;
+    renderPortfolio(JSON.parse(await res.text()));
+  } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+/**
+ * 2026-09-03 -> 3 ก.ย.
+ * ⚠️ ห้ามเอา ymd ไปสร้าง Date แล้วอ่านวันกลับ เบราว์เซอร์ตีเป็น UTC แล้วเลื่อนไปหนึ่งวัน
+ *    (คำเตือนเดียวกับที่ปฏิทินเขียนไว้แล้ว) — แยกสตริงเอาตรง ๆ ปลอดภัยกว่า
+ */
+function fmtYmd(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
+  if (!m) return String(ymd || '');
+  return Number(m[3]) + ' ' + CAL_MONTH[Number(m[2]) - 1];
+}
+
+/** +1.23 / -1.23 พร้อมสี — ไม่มีข้อมูลคืนช่องว่าง ไม่ใช่ศูนย์ */
+function money(n, unit) {
+  if (n === null || n === undefined) return '';
+  const sign = n > 0 ? '+' : '';
+  const cls = n > 0 ? 'up' : (n < 0 ? 'down' : '');
+  return '<span class="' + cls + '">' + sign + n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+    // % ติดกับตัวเลข ส่วนสกุลเงินเว้นวรรค — ตามที่คนอ่านคุ้นเคย
+    + (unit ? (unit === '%' ? '%' : ' ' + esc(unit)) : '') + '</span>';
+}
+
+function renderPortfolio(p) {
+  const box = $('portBox');
+  const body = $('portBody');
+  if (!box || !body) return;
+
+  const l = p && p.latest;
+  if (!l) {
+    // ไม่มีข้อมูลต้องบอกตรง ๆ ไม่ใช่แสดงศูนย์ซึ่งอ่านเหมือนพอร์ตว่างเปล่า
+    $('portAt').textContent = '';
+    body.innerHTML = '<div class="muted">ยังไม่ได้จดพอร์ต — เพิ่มหัวข้อวันที่ใน <code>พอร์ต.md</code></div>';
+    box.classList.remove('hidden');
+    return;
+  }
+
+  $('portAt').textContent = 'ณ ' + fmtYmd(l.date);
+
+  const cur = esc(l.currency || '');
+  const total = l.value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+  const head = '<div class="row" style="align-items:baseline; gap:10px; margin-top:4px">'
+    + '<strong style="font-size:1.35rem">' + total + ' ' + cur + '</strong>'
+    + (l.gain === null ? '' : '<span>' + money(l.gain, cur)
+        + ' <span class="muted">(' + (l.gainPct > 0 ? '+' : '') + l.gainPct + '%)</span></span>')
+    + '</div>'
+    + (l.partialCost ? '<div class="muted" style="font-size:.72rem">กำไรขาดทุนคิดจากเฉพาะรายการที่บอกต้นทุนไว้</div>' : '');
+
+  const since = p.since
+    ? '<div class="muted" style="font-size:.72rem; margin-top:2px">เทียบกับ ' + fmtYmd(p.since.date)
+      + ' (' + p.since.days + ' วัน) ' + money(p.since.value, cur)
+      + (p.since.valuePct === null ? '' : ' · ' + (p.since.valuePct > 0 ? '+' : '') + p.since.valuePct + '%')
+      + '</div>'
+    : '';
+
+  // แถบสัดส่วน — ตอบคำถาม "มีอะไรอยู่เท่าไหร่" ได้เร็วกว่าตัวเลข
+  const bar = '<div class="portbar" style="margin-top:10px">'
+    + l.byKind.map(function (k, i) {
+      return '<span class="seg s' + (i % 5) + '" style="width:' + k.pct + '%" title="'
+        + esc(k.kind) + ' ' + k.pct + '%"></span>';
+    }).join('')
+    + '</div>'
+    + '<div class="row" style="gap:10px; flex-wrap:wrap; margin-top:6px; font-size:.72rem">'
+    + l.byKind.map(function (k, i) {
+      return '<span class="muted"><span class="dot s' + (i % 5) + '"></span> ' + esc(k.kind) + ' ' + k.pct + '%</span>';
+    }).join('')
+    + '</div>';
+
+  const rows = '<table class="port"><tbody>'
+    + l.items.map(function (x) {
+      return '<tr><td>' + esc(x.name) + '</td>'
+        + '<td class="muted">' + esc(x.kind) + '</td>'
+        + '<td class="num">' + x.pct + '%</td>'
+        + '<td class="num">' + x.value.toLocaleString('en-US', { maximumFractionDigits: 2 }) + '</td>'
+        + '<td class="num">' + (x.gainPct === null ? '' : money(x.gainPct, '%')) + '</td></tr>';
+    }).join('')
+    + '</tbody></table>';
+
+  body.innerHTML = head + since + bar + rows;
+  box.classList.remove('hidden');
 }
 
 // ---------- ชั้นโปรเจค ----------
@@ -2723,7 +2846,7 @@ function renderAgents({ registry, regError, results }) {
 }
 
 const TABS = {
-  today:    ['plan', 'tasks', 'drafts'],
+  today:    ['plan', 'portBox', 'tasks', 'drafts'],
   cal:      ['calBox'],
   kn:       ['knBox'],
   projects: ['projects'],
