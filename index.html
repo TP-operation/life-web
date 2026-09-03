@@ -204,6 +204,14 @@
             white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; max-width:100%}
   .msg.me .bub{background:var(--accent); color:#fff; border-bottom-right-radius:5px}
   .msg.them .bub{background:var(--card2, rgba(127,127,127,.14)); border-bottom-left-radius:5px}
+  .fcard{border:1px solid var(--card2, rgba(127,127,127,.18)); border-radius:10px; padding:10px; margin-bottom:10px}
+  .pillars{display:flex; gap:6px; margin:8px 0}
+  .pillars .pil{flex:1; text-align:center; padding:8px 2px; border-radius:8px;
+                background:var(--card2, rgba(127,127,127,.12))}
+  .pillars .pil.me{outline:2px solid #3b82f6}
+  .pillars .slot{font-size:.66rem; opacity:.65}
+  .pillars .gz{font-size:1.15rem; font-weight:700; line-height:1.5}
+  .pillars .el{font-size:.66rem; opacity:.65}
   .portbar{display:flex; height:8px; border-radius:5px; overflow:hidden; background:var(--card2, rgba(127,127,127,.14))}
   .portbar .seg{display:block; height:100%}
   .dot{display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:middle; margin-right:3px}
@@ -378,6 +386,7 @@
   <button data-tab="kn">ความรู้</button>
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
   <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
+  <button data-tab="fortune">ดวง</button>
   <button data-tab="log">บันทึก</button>
   <button data-tab="do">สั่งงาน<span class="n" id="tabDoN"></span></button>
 </nav>
@@ -501,6 +510,16 @@
      ⚠️ 16 จาก 18 ใบเป็นร่างจาก AI ที่ยังไม่ผ่านการตรวจ และเป็นเรื่องยา
         สถานะนี้ต้องเห็นทั้งในรายการและตอนเปิดอ่าน การอ่านร่างที่ยังไม่ตรวจ
         โดยไม่รู้ตัว อันตรายกว่าการไม่มีโน้ตนั้นเลย -->
+<!-- ดวง — พื้นดวงที่คำนวณและตรวจแล้ว + คำถามที่สะสมไว้
+     ⚠️ สองอย่างนี้ห้ามวางปนกันจนดูน่าเชื่อเท่ากัน
+        พื้นดวงตรวจย้อนได้ · คำตอบเป็นการตีความที่ยังไม่มีใครตรวจ -->
+<section class="card hidden" id="fortuneBox">
+  <div id="fortuneChart"></div>
+  <input id="fortuneFind" placeholder="ค้นคำถามที่เคยถาม">
+  <div id="fortuneList"></div>
+  <div id="fortuneRead"></div>
+</section>
+
 <section class="card hidden" id="knBox">
   <div class="knbar" id="knBar">
     <button type="button" data-view="list" class="on">รายการ</button>
@@ -600,6 +619,94 @@ async function loadWeek(token) {
     if (!res.ok) return;
     renderWeek(JSON.parse(await res.text()));
   } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+}
+
+// ---------- ดวง ----------
+//
+// อ่าน state/fortune.json ที่ build-fortune.mjs สรุปไว้ — ไม่ยิงออกนอก GitHub
+//
+// ⚠️ พื้นดวงกับคำตอบต้องแยกกันให้เห็นชัดบนหน้าจอ
+//    พื้นดวงคำนวณมาและตรวจย้อนได้ (scripts/bazi.mjs + เทส)
+//    คำตอบเป็นการตีความที่ยังไม่มีใครตรวจ — ติดป้าย "ยังไม่ตรวจ" ไว้เสมอ
+//    หลักเดียวกับที่ใช้กับ 30-knowledge และ 31-gmp
+
+const FORTUNE_PATH = 'state/fortune.json';
+const fortuneState = { loaded: false, data: null, q: '' };
+
+const GZ_ELEMENT = {
+  '甲': 'ไม้', '乙': 'ไม้', '丙': 'ไฟ', '丁': 'ไฟ', '戊': 'ดิน',
+  '己': 'ดิน', '庚': 'ทอง', '辛': 'ทอง', '壬': 'น้ำ', '癸': 'น้ำ',
+};
+const SLOT_TH = { year: 'ปี', month: 'เดือน', day: 'วัน', hour: 'ยาม' };
+
+async function loadFortune() {
+  const token = getToken();
+  if (!token) return;
+  try {
+    const res = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + FORTUNE_PATH + '?ref=' + STATE_REF, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      $('fortuneChart').innerHTML = '<div class="muted">ยังไม่มี state/fortune.json — รอ daily-plan รอบถัดไป</div>';
+      return;
+    }
+    fortuneState.data = JSON.parse(await res.text());
+    fortuneState.loaded = true;
+    renderFortune();
+  } catch (e) {
+    $('fortuneChart').innerHTML = '<div class="muted">อ่านข้อมูลดวงไม่ได้ — ' + esc(String(e.message || e)) + '</div>';
+  }
+}
+
+function renderChartCard(c) {
+  if (!c.chart) {
+    // ยังไม่มีข้อมูลต้องบอกตรง ๆ ห้ามวาดตารางเปล่าที่ดูเหมือนคำนวณแล้วได้ผลว่าง
+    return '<div class="fcard"><div class="row" style="justify-content:space-between">'
+      + '<strong>' + esc(c.title) + '</strong><span class="muted">' + esc(c.status || '') + '</span></div>'
+      + '<div class="muted" style="margin-top:6px">' + esc(c.excerpt || 'ยังไม่มีข้อมูล') + '</div></div>';
+  }
+  const b = c.chart.birth;
+  const cols = c.chart.pillars.map(function (p) {
+    const stem = p.gz.charAt(0);
+    const isDay = p.slot === 'day';
+    return '<div class="pil' + (isDay ? ' me' : '') + '">'
+      + '<div class="slot">' + esc(SLOT_TH[p.slot] || p.slot) + '</div>'
+      + '<div class="gz">' + esc(p.gz) + '</div>'
+      + '<div class="el">' + esc(GZ_ELEMENT[stem] || '') + '</div></div>';
+  }).join('');
+  return '<div class="fcard">'
+    + '<div class="row" style="justify-content:space-between">'
+    + '<strong>' + esc(c.title) + '</strong>'
+    + '<span class="muted">' + esc([b.date, b.time, b.place].filter(Boolean).join(' · ')) + '</span></div>'
+    + '<div class="pillars">' + cols + '</div>'
+    + (c.chart.dayMaster
+      ? '<div class="muted" style="font-size:.74rem">ธาตุประจำตัว ' + esc(c.chart.dayMaster)
+        + ' — ' + esc(GZ_ELEMENT[c.chart.dayMaster] || '') + ' · เสาวันคือตัวแทนเจ้าชะตา</div>'
+      : '')
+    + '</div>';
+}
+
+function renderFortune() {
+  const d = fortuneState.data;
+  if (!d) return;
+  $('fortuneChart').innerHTML = (d.charts || []).map(renderChartCard).join('');
+
+  const q = fortuneState.q.trim().toLowerCase();
+  const asks = (d.asks || []).filter(function (a) {
+    if (!q) return true;
+    return (a.title + ' ' + (a.tags || []).join(' ') + ' ' + (a.excerpt || '')).toLowerCase().indexOf(q) > -1;
+  });
+
+  $('fortuneList').innerHTML = asks.length
+    ? asks.map(function (a) {
+      return '<div class="knitem" data-file="' + esc(a.file) + '">'
+        + '<div class="row" style="justify-content:space-between; gap:8px">'
+        + '<strong>' + esc(a.title) + '</strong>'
+        + (a.verified ? '<i class="okv">ตรวจแล้ว</i>' : '<i class="warn">ยังไม่ตรวจ</i>')
+        + '</div><div class="muted">' + esc(a.excerpt || '') + '</div></div>';
+    }).join('')
+    : '<div class="muted">' + (q ? 'ไม่เจอคำถามที่ตรง' : 'ยังไม่มีคำถามที่เก็บไว้ — พิมพ์ ถาม ในแท็บสั่งงานได้เลย') + '</div>';
 }
 
 // ---------- พอร์ตการลงทุน ----------
@@ -2852,6 +2959,7 @@ const TABS = {
   projects: ['projects'],
   agents:   ['agents'],
   log:      ['otBox', 'timerBox', 'week'],
+  fortune:  ['fortuneBox'],
   do:       ['chatBox'],
 };
 const TAB_KEY = 'life_tab';
@@ -2868,6 +2976,9 @@ document.addEventListener('visibilitychange', () => {
     loadAgents({ quiet: true });
   }
 });
+
+// ค้นคำถามดวง — ผูกครั้งเดียวเช่นกัน
+$('fortuneFind').oninput = (e) => { fortuneState.q = e.target.value; renderFortune(); };
 
 // แนบรูป — ผูกครั้งเดียวตอนโหลด **ห้ามไปอยู่ใน showTab**
 // showTab ถูกเรียกทุกครั้งที่สลับแท็บ ถ้าผูก addEventListener ที่นั่น
@@ -2896,6 +3007,8 @@ function showTab(name) {
     }
   }
   $('chatSend').onclick = sendChat;
+  // โหลดครั้งเดียวตอนเปิดแท็บดวงครั้งแรก — ข้อมูลแทบไม่เปลี่ยนระหว่างวัน
+  if (tab === 'fortune' && !fortuneState.loaded) loadFortune();
 // Enter ส่ง · Shift+Enter ขึ้นบรรทัดใหม่ — เหมือนแอปแชททั่วไป
 // แต่บนมือถือปล่อยให้ Enter ขึ้นบรรทัดใหม่ตามปกติ เพราะไม่มีปุ่ม Shift ให้กด
 $('chatInput').onkeydown = (e) => {
