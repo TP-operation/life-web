@@ -667,6 +667,25 @@ function renderChartCard(c) {
       + '<div class="muted" style="margin-top:6px">' + esc(c.excerpt || 'ยังไม่มีข้อมูล') + '</div></div>';
   }
   const b = c.chart.birth;
+  const head = '<div class="row" style="justify-content:space-between">'
+    + '<strong>' + esc(c.title) + '</strong>'
+    + '<span class="muted">' + esc([b.date, b.time, b.place].filter(Boolean).join(' · ')) + '</span></div>';
+
+  // ดวงไทยเป็นลัคนา+ดาว ไม่ใช่สี่เสา — วาดคนละแบบ ห้ามยัดให้เป็นรูปเดียวกัน
+  if (c.chart.kind === 'thai') {
+    const l = c.chart.lagna;
+    return '<div class="fcard">' + head
+      + '<div class="pillars"><div class="pil me" style="flex:2">'
+      + '<div class="slot">ลัคนา</div>'
+      + '<div class="gz" style="font-size:1rem">' + esc(l.rasi) + ' ' + esc(l.deg || '') + '</div>'
+      + '<div class="el">' + esc(l.nakshatra || '') + '</div></div></div>'
+      + (c.chart.tanuSet
+        ? '<div class="muted" style="font-size:.74rem">ตนุเศษ ' + esc(c.chart.tanuSet) + '</div>'
+        : '')
+      + '<div class="muted" style="font-size:.72rem;margin-top:4px">ตำแหน่งดาวทั้งหมดอยู่ในโน้ต</div>'
+      + '</div>';
+  }
+
   const cols = c.chart.pillars.map(function (p) {
     const stem = p.gz.charAt(0);
     const isDay = p.slot === 'day';
@@ -675,10 +694,7 @@ function renderChartCard(c) {
       + '<div class="gz">' + esc(p.gz) + '</div>'
       + '<div class="el">' + esc(GZ_ELEMENT[stem] || '') + '</div></div>';
   }).join('');
-  return '<div class="fcard">'
-    + '<div class="row" style="justify-content:space-between">'
-    + '<strong>' + esc(c.title) + '</strong>'
-    + '<span class="muted">' + esc([b.date, b.time, b.place].filter(Boolean).join(' · ')) + '</span></div>'
+  return '<div class="fcard">' + head
     + '<div class="pillars">' + cols + '</div>'
     + (c.chart.dayMaster
       ? '<div class="muted" style="font-size:.74rem">ธาตุประจำตัว ' + esc(c.chart.dayMaster)
