@@ -648,7 +648,12 @@ async function loadFortune() {
       cache: 'no-store',
     });
     if (!res.ok) {
-      $('fortuneChart').innerHTML = '<div class="muted">ยังไม่มี state/fortune.json — รอ daily-plan รอบถัดไป</div>';
+      // ⚠️ ต้องเปิดการ์ดด้วย ไม่งั้นข้อความนี้ไม่มีใครเห็น เพราะการ์ดยังมีคลาส hidden
+      //    บั๊กจริง 3 ก.ย. 2026 — เปิดแท็บแล้วเจอหน้าว่างสนิท ไม่รู้ว่าเกิดอะไรขึ้น
+      $('fortuneChart').innerHTML = res.status === 404
+        ? '<div class="muted">ยังไม่มี <code>state/fortune.json</code> — รอ daily-plan รอบถัดไป</div>'
+        : '<div class="muted">อ่านข้อมูลดวงไม่ได้ — GitHub ตอบ ' + res.status + '</div>';
+      $('fortuneBox').classList.remove('hidden');
       return;
     }
     fortuneState.data = JSON.parse(await res.text());
@@ -656,6 +661,7 @@ async function loadFortune() {
     renderFortune();
   } catch (e) {
     $('fortuneChart').innerHTML = '<div class="muted">อ่านข้อมูลดวงไม่ได้ — ' + esc(String(e.message || e)) + '</div>';
+    $('fortuneBox').classList.remove('hidden');
   }
 }
 
@@ -707,6 +713,7 @@ function renderFortune() {
   const d = fortuneState.data;
   if (!d) return;
   $('fortuneChart').innerHTML = (d.charts || []).map(renderChartCard).join('');
+  $('fortuneBox').classList.remove('hidden');
 
   const q = fortuneState.q.trim().toLowerCase();
   const asks = (d.asks || []).filter(function (a) {
@@ -741,9 +748,14 @@ async function loadPortfolio(token) {
       headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github.raw+json' },
       cache: 'no-store',
     });
-    if (!res.ok) return;
+    // ⚠️ หาไฟล์ไม่เจอ **ห้ามเงียบ** — การ์ดมีคลาส hidden อยู่ ถ้า return เฉย ๆ
+    //    ทั้งการ์ดจะหายไปโดยไม่มีอะไรบอกว่าทำไม
+    //    เกิดขึ้นจริง 3 ก.ย. 2026 — เจ้าของเปิดแท็บแล้วเจอหน้าว่างเปล่า
+    if (!res.ok) { renderPortfolio(null, res.status); return; }
     renderPortfolio(JSON.parse(await res.text()));
-  } catch { /* เงียบได้เฉพาะส่วนเสริม ส่วนหลักห้ามเงียบ */ }
+  } catch (e) {
+    renderPortfolio(null, String(e.message || e));
+  }
 }
 
 /**
@@ -767,7 +779,7 @@ function money(n, unit) {
     + (unit ? (unit === '%' ? '%' : ' ' + esc(unit)) : '') + '</span>';
 }
 
-function renderPortfolio(p) {
+function renderPortfolio(p, why) {
   const box = $('portBox');
   const body = $('portBody');
   if (!box || !body) return;
@@ -775,8 +787,13 @@ function renderPortfolio(p) {
   const l = p && p.latest;
   if (!l) {
     // ไม่มีข้อมูลต้องบอกตรง ๆ ไม่ใช่แสดงศูนย์ซึ่งอ่านเหมือนพอร์ตว่างเปล่า
+    // ต้องแยก "ยังไม่ได้จด" ออกจาก "อ่านไฟล์ไม่ได้" เพราะแก้คนละทาง
     $('portAt').textContent = '';
-    body.innerHTML = '<div class="muted">ยังไม่ได้จดพอร์ต — เพิ่มหัวข้อวันที่ใน <code>พอร์ต.md</code></div>';
+    body.innerHTML = why === undefined
+      ? '<div class="muted">ยังไม่ได้จดพอร์ต — เพิ่มหัวข้อวันที่ใน <code>พอร์ต.md</code></div>'
+      : (why === 404
+        ? '<div class="muted">ยังไม่มี <code>state/portfolio.json</code> — รอ daily-plan รอบถัดไป</div>'
+        : '<div class="muted">อ่านข้อมูลพอร์ตไม่ได้ — ' + esc(String(why)) + '</div>');
     box.classList.remove('hidden');
     return;
   }
