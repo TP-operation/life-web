@@ -128,19 +128,19 @@
         font-size:.68rem; color:var(--crit); background:var(--crit-bg); border:1px solid var(--crit)}
   .okv{display:inline-block; padding:1px 6px; margin-right:5px; border-radius:5px;
        font-size:.68rem; color:var(--safe); border:1px solid var(--safe)}
-  #knRead{line-height:1.6}
-  #knRead h1{font-size:1.05rem; margin:0 0 10px}
-  #knRead h2{font-size:.95rem; margin:16px 0 6px}
-  #knRead h3{font-size:.88rem; margin:12px 0 4px; opacity:.9}
-  #knRead p{margin:0 0 9px}
-  #knRead li{margin:0 0 5px 18px}
-  #knRead pre{padding:9px; overflow-x:auto; font-size:.8rem;
+  #knRead, #fortuneRead{line-height:1.6}
+  #knRead, #fortuneRead h1{font-size:1.05rem; margin:0 0 10px}
+  #knRead, #fortuneRead h2{font-size:.95rem; margin:16px 0 6px}
+  #knRead, #fortuneRead h3{font-size:.88rem; margin:12px 0 4px; opacity:.9}
+  #knRead, #fortuneRead p{margin:0 0 9px}
+  #knRead, #fortuneRead li{margin:0 0 5px 18px}
+  #knRead, #fortuneRead pre{padding:9px; overflow-x:auto; font-size:.8rem;
               background:var(--card2, rgba(127,127,127,.12)); border-radius:8px}
-  #knRead blockquote{margin:0 0 10px; padding:8px 11px; border-left:3px solid var(--crit);
+  #knRead, #fortuneRead blockquote{margin:0 0 10px; padding:8px 11px; border-left:3px solid var(--crit);
                      background:var(--crit-bg); border-radius:0 8px 8px 0; font-size:.85rem}
-  #knRead .wl{color:var(--accent); cursor:pointer; text-decoration:underline}
-  #knRead table{width:100%; border-collapse:collapse; font-size:.8rem; margin:0 0 10px; display:block; overflow-x:auto}
-  #knRead td, #knRead th{padding:5px 8px; border:1px solid var(--line); text-align:left}
+  #knRead, #fortuneRead .wl{color:var(--accent); cursor:pointer; text-decoration:underline}
+  #knRead, #fortuneRead table{width:100%; border-collapse:collapse; font-size:.8rem; margin:0 0 10px; display:block; overflow-x:auto}
+  #knRead td, #knRead th, #fortuneRead td, #fortuneRead th{padding:5px 8px; border:1px solid var(--line); text-align:left}
   .knback{margin-bottom:10px; padding:7px 12px; font:inherit; font-size:.82rem; cursor:pointer;
           color:inherit; background:transparent; border:1px solid var(--line);
           border-radius:9px; -webkit-appearance:none}
@@ -205,6 +205,7 @@
   .msg.me .bub{background:var(--accent); color:#fff; border-bottom-right-radius:5px}
   .msg.them .bub{background:var(--card2, rgba(127,127,127,.14)); border-bottom-left-radius:5px}
   .fcard{border:1px solid var(--card2, rgba(127,127,127,.18)); border-radius:10px; padding:10px; margin-bottom:10px}
+  .fcard.fopen{cursor:pointer}
   .pillars{display:flex; gap:6px; margin:8px 0}
   .pillars .pil{flex:1; text-align:center; padding:8px 2px; border-radius:8px;
                 background:var(--card2, rgba(127,127,127,.12))}
@@ -631,7 +632,7 @@ async function loadWeek(token) {
 //    หลักเดียวกับที่ใช้กับ 30-knowledge และ 31-gmp
 
 const FORTUNE_PATH = 'state/fortune.json';
-const fortuneState = { loaded: false, data: null, q: '' };
+const fortuneState = { loaded: false, data: null, q: '', open: null };
 
 const GZ_ELEMENT = {
   '甲': 'ไม้', '乙': 'ไม้', '丙': 'ไฟ', '丁': 'ไฟ', '戊': 'ดิน',
@@ -668,7 +669,7 @@ async function loadFortune() {
 function renderChartCard(c) {
   if (!c.chart) {
     // ยังไม่มีข้อมูลต้องบอกตรง ๆ ห้ามวาดตารางเปล่าที่ดูเหมือนคำนวณแล้วได้ผลว่าง
-    return '<div class="fcard"><div class="row" style="justify-content:space-between">'
+    return '<div class="fcard fopen" data-file="' + esc(c.file) + '"><div class="row" style="justify-content:space-between">'
       + '<strong>' + esc(c.title) + '</strong><span class="muted">' + esc(c.status || '') + '</span></div>'
       + '<div class="muted" style="margin-top:6px">' + esc(c.excerpt || 'ยังไม่มีข้อมูล') + '</div></div>';
   }
@@ -680,7 +681,7 @@ function renderChartCard(c) {
   // ดวงไทยเป็นลัคนา+ดาว ไม่ใช่สี่เสา — วาดคนละแบบ ห้ามยัดให้เป็นรูปเดียวกัน
   if (c.chart.kind === 'thai') {
     const l = c.chart.lagna;
-    return '<div class="fcard">' + head
+    return '<div class="fcard fopen" data-file="' + esc(c.file) + '">' + head
       + '<div class="pillars"><div class="pil me" style="flex:2">'
       + '<div class="slot">ลัคนา</div>'
       + '<div class="gz" style="font-size:1rem">' + esc(l.rasi) + ' ' + esc(l.deg || '') + '</div>'
@@ -700,7 +701,7 @@ function renderChartCard(c) {
       + '<div class="gz">' + esc(p.gz) + '</div>'
       + '<div class="el">' + esc(GZ_ELEMENT[stem] || '') + '</div></div>';
   }).join('');
-  return '<div class="fcard">' + head
+  return '<div class="fcard fopen" data-file="' + esc(c.file) + '">' + head
     + '<div class="pillars">' + cols + '</div>'
     + (c.chart.dayMaster
       ? '<div class="muted" style="font-size:.74rem">ธาตุประจำตัว ' + esc(c.chart.dayMaster)
@@ -709,9 +710,73 @@ function renderChartCard(c) {
     + '</div>';
 }
 
+/**
+ * เปิดอ่านโน้ตในคลังดวง — ทั้งพื้นดวงและคำถามที่เคยถาม
+ *
+ * ⚠️ รายการที่ดูเหมือนกดได้แต่กดไม่ได้ แย่กว่ารายการที่ไม่มีปุ่มเลย
+ *    3 ก.ย. 2026 ปล่อยไปแบบนั้นจริง — เจ้าของกดแล้วไม่มีอะไรเกิดขึ้น
+ *
+ * ใช้ ghText กับ mdNote ตัวเดียวกับแท็บความรู้ ไม่เขียนตัวอ่าน markdown ใหม่
+ */
+const fortuneBodies = new Map();
+
+function fortunePath(file) {
+  // เข้ารหัสทีละส่วน ไม่งั้นเครื่องหมาย / ใน "ถาม/xxx.md" จะถูกเข้ารหัสไปด้วย
+  // เข้ารหัสชื่อโฟลเดอร์ด้วย ไม่พึ่งว่าเบราว์เซอร์จะเข้ารหัสอักษรไทยให้เอง
+  return ['33-ดวง'].concat(String(file).split('/')).map(encodeURIComponent).join('/');
+}
+
+async function openFortuneNote(file) {
+  const d = fortuneState.data || {};
+  const item = (d.charts || []).concat(d.asks || []).find((x) => x.file === file);
+  if (!item) return;
+
+  fortuneState.open = file;
+  $('fortuneChart').innerHTML = '';
+  $('fortuneFind').style.display = 'none';
+  $('fortuneList').innerHTML = '';
+  $('fortuneRead').innerHTML = '<p class="muted">กำลังเปิด…</p>';
+
+  const back = '<button class="knback" type="button">← กลับไปที่รายการ</button>';
+  try {
+    if (!fortuneBodies.has(file)) {
+      const raw = await ghText(
+        'https://api.github.com/repos/' + REPO + '/contents/' + fortunePath(file),
+        getToken(),
+      );
+      fortuneBodies.set(file, raw);
+    }
+    const body = String(fortuneBodies.get(file)).replace(/^---\n[\s\S]*?\n---\n?/, '');
+    const badge = item.verified === undefined
+      ? '<span class="muted">' + esc(item.status || '') + '</span>'
+      : (item.verified ? '<i class="okv">ตรวจแล้ว</i>' : '<i class="warn">ยังไม่ผ่านการตรวจ</i>');
+    $('fortuneRead').innerHTML = back
+      + '<p>' + badge + '<span class="muted"> ' + esc(item.updated || '') + '</span></p>'
+      + mdNote(body);
+  } catch (e) {
+    const code = String(e.status ?? e.message ?? e);
+    $('fortuneRead').innerHTML = back
+      + '<p class="muted">เปิดโน้ตไม่ได้ — ' + esc(code)
+      + (code === '404' ? ' (ไฟล์อาจถูกเปลี่ยนชื่อ)' : '') + '</p>';
+  }
+  wireFortuneBack();
+}
+
+function wireFortuneBack() {
+  const b = $('fortuneRead').querySelector('.knback');
+  if (!b) return;
+  b.onclick = () => {
+    fortuneState.open = null;
+    $('fortuneRead').innerHTML = '';
+    $('fortuneFind').style.display = '';
+    renderFortune();
+  };
+}
+
 function renderFortune() {
   const d = fortuneState.data;
   if (!d) return;
+  if (fortuneState.open) return;   // กำลังอ่านโน้ตอยู่ อย่าวาดทับ
   $('fortuneChart').innerHTML = (d.charts || []).map(renderChartCard).join('');
   $('fortuneBox').classList.remove('hidden');
 
@@ -3012,6 +3077,14 @@ document.addEventListener('visibilitychange', () => {
 
 // ค้นคำถามดวง — ผูกครั้งเดียวเช่นกัน
 $('fortuneFind').oninput = (e) => { fortuneState.q = e.target.value; renderFortune(); };
+$('fortuneList').onclick = (e) => {
+  const el = e.target.closest('.knitem');
+  if (el) openFortuneNote(el.dataset.file);
+};
+$('fortuneChart').onclick = (e) => {
+  const el = e.target.closest('.fopen');
+  if (el) openFortuneNote(el.dataset.file);
+};
 
 // แนบรูป — ผูกครั้งเดียวตอนโหลด **ห้ามไปอยู่ใน showTab**
 // showTab ถูกเรียกทุกครั้งที่สลับแท็บ ถ้าผูก addEventListener ที่นั่น
