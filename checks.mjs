@@ -115,6 +115,61 @@ export function chatRoutesIn(html) {
   return [...m[1].matchAll(/[{,]\s*p:\s*'([^']+)'/g)].map((x) => x[1]);
 }
 
+/**
+ * ความลับที่ห้ามอยู่ในไฟล์ไม่ว่ากรณีใด
+ *
+ * 🛑 ย้ายมาจาก `agent-guard.yml` เมื่อ 8 ก.ย. 2026
+ *    ที่นั่นรันเฉพาะ `pull_request_target` — **push ตรงเข้า main ไม่เคยโดนตรวจเลย**
+ *    และ `checks.mjs` เองไม่มีกฎนี้สักข้อ ทั้งที่ README ประกาศว่า "ไม่มีโทเคนฝังในโค้ด"
+ *    ตอนนี้ `checks` เป็น required status check แล้ว จึงเป็นที่ที่ถูกต้อง
+ *
+ * ⚠️ ต้องกำหนดความยาวขั้นต่ำ ไม่งั้น placeholder `github_pat_...` ในช่องกรอก
+ *    จะถูกจับเป็นโทเคนหลุด แล้วคนจะปิดด่านทิ้งเพราะมันร้องผิด
+ */
+export const SECRET_PATTERNS = [
+  { re: /gh[pousr]_[A-Za-z0-9]{30,}/, what: 'GitHub token' },
+  { re: /github_pat_[A-Za-z0-9_]{30,}/, what: 'GitHub PAT' },
+  { re: /sk-ant-[A-Za-z0-9_-]{20,}/, what: 'Anthropic API key' },
+  { re: /AKfyc[A-Za-z0-9_-]{20,}/, what: 'URL ของ Apps Script deployment' },
+];
+
+export function secretsIn(text) {
+  const t = String(text ?? '');
+  return SECRET_PATTERNS.filter((p) => p.re.test(t)).map((p) => p.what);
+}
+
+/**
+ * ที่เก็บโทเคน **โดยปริยาย** — คืน 'sessionStorage' · 'localStorage' · null
+ *
+ * 🛑 ของเดิมตรวจแค่ `/sessionStorage/.test(html)` ซึ่งพิสูจน์แล้วว่าไม่กันอะไรเลย
+ *    CTO เปลี่ยน `store()` ให้คืน localStorage เสมอ แล้วด่านยังเขียว
+ *    เพราะคำว่า sessionStorage ยังอยู่ในคอมเมนต์บรรทัดอื่น
+ *
+ * ตอนนี้ตรวจ **รูปของนิพจน์** — ต้องเป็น "ถ้าเคยติ๊กจำไว้ ใช้ localStorage
+ * มิฉะนั้น sessionStorage" เท่านั้น · รูปอื่นถือว่าเก็บถาวรไว้ก่อน
+ * **เดาไปทางที่อันตรายกว่าเสมอ** จนกว่าจะพิสูจน์ว่าไม่ใช่
+ */
+export function tokenStore(html) {
+  const m = /const store\s*=\s*\(\)\s*=>\s*([^;]+);/.exec(String(html ?? ''));
+  if (!m) return null;
+  const body = m[1].trim();
+  if (/\?[^:]*:\s*sessionStorage\s*\)?\s*$/.test(body)) return 'sessionStorage';
+  if (/^\(?\s*sessionStorage\s*\)?$/.test(body)) return 'sessionStorage';
+  return 'localStorage';
+}
+
+/**
+ * เกณฑ์ชั่วโมงที่ถือว่าข้อมูลเก่า — คืนตัวเลข หรือ null ถ้าไม่มีเลย
+ *
+ * ⚠️ **ข้อนี้พิสูจน์ได้แค่ว่ากฎยังอยู่ในโค้ด ไม่ได้พิสูจน์ว่ามันขึ้นจริงบนหน้าจอ**
+ *    การพิสูจน์อย่างหลังต้องรันหน้าใน DOM ซึ่งยังทำไม่ได้ที่นี่
+ *    README ต้องเขียนตรง ๆ ว่าข้อนี้ยังอาศัยคน
+ */
+export function staleHours(html) {
+  const m = /ageH\s*>\s*(\d+)/.exec(String(html ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
 export function check(html, { root = ROOT } = {}) {
   const errors = [];
   const warnings = [];
@@ -185,8 +240,28 @@ export function check(html, { root = ROOT } = {}) {
     }
   }
 
-  if (!/sessionStorage/.test(html)) {
-    warnings.push('ไม่เจอ sessionStorage — โทเคนของคอมที่ทำงานต้องไม่ถูกเก็บถาวร (INVARIANTS §5.1)');
+  // ---- ความลับห้ามอยู่ในไฟล์ ----
+  for (const what of secretsIn(html)) {
+    errors.push(`เจอ ${what} ในไฟล์ — repo นี้ public และประวัติ git ลบไม่ได้`);
+  }
+
+  // ---- โทเคนต้องไม่ถูกเก็บถาวรโดยปริยาย ----
+  const storeKind = tokenStore(html);
+  facts.tokenStore = storeKind;
+  if (storeKind === null) {
+    errors.push('หา store() ไม่เจอ — ไม่รู้ว่าโทเคนถูกเก็บที่ไหน ซึ่งแปลว่าตรวจไม่ได้');
+  } else if (storeKind !== 'sessionStorage') {
+    errors.push('โทเคนถูกเก็บถาวรโดยปริยาย — คอมที่ทำงานไม่ใช่เครื่องของเรา'
+      + ' ต้องเป็น sessionStorage เว้นแต่ผู้ใช้ติ๊กจำไว้เอง (INVARIANTS §5.1)');
+  }
+
+  // ---- ต้องเตือนเมื่อข้อมูลเก่า ----
+  const stale = staleHours(html);
+  facts.staleHours = stale;
+  if (stale === null) {
+    errors.push('ไม่มีเกณฑ์เตือนข้อมูลเก่า — หน้าจะแสดงแผนของเมื่อวานเหมือนของวันนี้เงียบ ๆ');
+  } else if (stale > 24) {
+    errors.push(`เกณฑ์เตือนข้อมูลเก่าตั้งไว้ ${stale} ชม. ซึ่งเกินหนึ่งวัน — สายเกินจะมีประโยชน์`);
   }
 
   // ---- กล่องแชทต้องรู้จักคำสั่งครบตามที่ฝั่งเซิร์ฟเวอร์รับจริง ----

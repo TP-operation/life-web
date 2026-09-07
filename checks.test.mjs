@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   check, inlineScripts, topLevelNames, duplicateNames, idsIn, idsUsed, hostsIn, ALLOWED_HOSTS,
-  chatRoutesIn,
+  chatRoutesIn, secretsIn, tokenStore, staleHours,
 } from './checks.mjs';
 
 /** จุดจบของฟังก์ชันที่คอลัมน์ 0 — เขียนแบบนี้เพื่อเลี่ยง escape ในสคริปต์ที่สร้างไฟล์นี้ */
@@ -18,13 +18,23 @@ const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const REAL = readFileSync(`${ROOT}index.html`, 'utf8');
 
 // ทุก fixture ต้องเป็น "หน้าที่ถูกต้องอยู่แล้ว" ยกเว้นสิ่งที่เทสนั้นตั้งใจทำให้ผิด
-// จึงต้องมี CHAT_ROUTES ครบติดมาด้วย ไม่งั้นทุกเทสจะแดงเพราะเรื่องที่ไม่ได้ทดสอบ
-const ROUTES_OK = `<script>const CHAT_ROUTES = [`
+// ไม่งั้นทุกเทสจะแดงเพราะเรื่องที่ไม่ได้ทดสอบ
+//
+// 8 ก.ย. 2026 เติมสองอย่างเข้ามา เพราะกฎเรื่องที่เก็บโทเคนกับการเตือนข้อมูลเก่า
+// เปลี่ยนจาก warning เป็น error — หน้าที่ขาดสองอย่างนี้ไม่ใช่หน้าที่ถูกต้องอีกต่อไป
+const BASELINE = `<script>const CHAT_ROUTES = [`
   + ['ออกกำลังกาย', 'ปิดงาน', 'เพิ่มงาน', 'โอที', 'ยืนยันงาน', 'ทิ้งงาน', 'นัด', 'ตอบ', 'สั่ง', 'ถาม']
     .map((p) => `{ p: '${p}' },`).join('')
-  + `];</script>`;
+  + `];
+const KEY = 'pat';
+const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);
+function staleNote(genMs) {
+  const ageH = (Date.now() - genMs) / 3600000;
+  return ageH > 18 ? 'ข้อมูลเก่า' : '';
+}
+</script>`;
 
-const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}${ROUTES_OK}</body></html>`;
+const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}${BASELINE}</body></html>`;
 
 // ---------- หน้าจริงต้องผ่าน ----------
 
@@ -166,14 +176,85 @@ test('generator ก็ต้องถูกมองเห็น — ยัง�
   assert.deepEqual(topLevelNames('async function* stream() {}').map((d) => d.name), ['stream']);
 });
 
+
+// ---------- กฎที่ README ประกาศไว้ ต้องมีกลไกบังคับ ----------
+//
+// 🛑 8 ก.ย. 2026 CTO พิสูจน์ว่า README อ้างสี่ข้อแต่ **ไม่มีข้อไหนถูกบังคับเลย**
+//    ทุกข้อข้างล่างนี้คือเคสที่มันทดลองแล้วด่านเดิมผ่านเงียบ
+
+test('🛑 ฝังโทเคนลงในไฟล์ต้องแดง — repo นี้ public และประวัติ git ลบไม่ได้', () => {
+  const pat = 'github_pat_11ABCDEFG0123456789abcdefghijklmnopqrstuvwxyz';
+  const { errors } = check(page('<script>const T = "' + pat + '";</script>'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('GitHub PAT')));
+});
+
+test('จับความลับได้ครบทั้งสี่ชนิด', () => {
+  assert.deepEqual(secretsIn('ghp_' + 'a'.repeat(36)), ['GitHub token']);
+  assert.deepEqual(secretsIn('sk-ant-' + 'b'.repeat(24)), ['Anthropic API key']);
+  assert.deepEqual(secretsIn('AKfyc' + 'c'.repeat(24)), ['URL ของ Apps Script deployment']);
+  assert.deepEqual(secretsIn('ไม่มีอะไร'), []);
+  assert.deepEqual(secretsIn(null), []);
+});
+
+test('⚠️ placeholder ในช่องกรอกต้องไม่ถูกจับเป็นโทเคนหลุด', () => {
+  // ถ้าด่านร้องผิด คนจะปิดมันทิ้ง แล้วเราจะเสียด่านไปทั้งอัน
+  assert.deepEqual(secretsIn('placeholder="github_pat_..."'), []);
+  assert.deepEqual(secretsIn('ใส่ ghp_ ตามด้วยรหัส'), []);
+});
+
+test('ด่านจริง — ไฟล์ที่ใช้อยู่ต้องไม่มีความลับ', () => {
+  assert.deepEqual(secretsIn(REAL), []);
+});
+
+test('🛑 บังคับให้เก็บโทเคนถาวรต้องแดง — คอมที่ทำงานไม่ใช่เครื่องของเรา', () => {
+  // CTO เปลี่ยน store() ให้คืน localStorage เสมอแล้วด่านเดิมยังเขียว
+  // เพราะมันตรวจแค่ว่ามีคำว่า sessionStorage อยู่ในไฟล์ ซึ่งยังอยู่ในคอมเมนต์
+  const good = 'const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);';
+  const bad = 'const store = () => localStorage; // sessionStorage';
+  assert.equal(tokenStore(good), 'sessionStorage');
+  assert.equal(tokenStore(bad), 'localStorage');
+  assert.equal(tokenStore('ไม่มี store เลย'), null);
+});
+
+test('รูปที่อ่านไม่ออกต้องถือว่าอันตรายไว้ก่อน', () => {
+  // เดาไปทางที่ปลอดภัยกว่า = เดาผิดแล้วโทเคนค้างในเครื่องคนอื่น
+  assert.equal(tokenStore('const store = () => pickStore();'), 'localStorage');
+});
+
+test('ด่านจริง — หน้าที่ใช้อยู่ต้องเก็บโทเคนแบบชั่วคราวโดยปริยาย', () => {
+  assert.equal(tokenStore(REAL), 'sessionStorage');
+});
+
+test('🛑 ลบเงื่อนไขเตือนข้อมูลเก่าต้องแดง', () => {
+  // ไม่มีเงื่อนไขนี้ หน้าจะแสดงแผนของเมื่อวานเหมือนของวันนี้โดยไม่มีอะไรบอก
+  assert.equal(staleHours('if (ageH > 18) {'), 18);
+  assert.equal(staleHours('if (false) {'), null);
+  const { errors } = check(REAL.replace('ageH > 18', 'false'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('เตือนข้อมูลเก่า')));
+});
+
+test('เกณฑ์ที่หลวมเกินหนึ่งวันก็ไม่นับว่ามีกฎ', () => {
+  const { errors } = check(REAL.replace('ageH > 18', 'ageH > 72'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('72')));
+});
+
+test('ด่านจริง — เกณฑ์ที่ใช้อยู่ต้องไม่เกินหนึ่งวัน', () => {
+  const h = staleHours(REAL);
+  assert.ok(h !== null && h <= 24, 'ได้ ' + h);
+});
+
 test('topLevelNames นับเฉพาะที่คอลัมน์ 0', () => {
   const names = topLevelNames('const a = 1;\n  const b = 2;\nfunction c() {}').map((d) => d.name);
   assert.deepEqual(names, ['a', 'c']);
 });
 
-test('เตือนถ้าไม่เจอ sessionStorage', () => {
-  const { warnings } = check(page('<script>const a = 1;</script>'), { root: ROOT });
-  assert.ok(warnings.some((w) => w.includes('sessionStorage')));
+test('หน้าที่ไม่บอกว่าเก็บโทเคนที่ไหน ต้องแดง ไม่ใช่แค่เตือน', () => {
+  // ⚠️ ของเดิมเป็น warning ซึ่ง CI ไม่แดง แปลว่ากฎนี้ไม่เคยกันอะไรเลย
+  //    ตอนนี้ยกเป็น error แล้ว — ตรวจไม่ได้ ต้องถือว่าไม่ผ่าน
+  const body = '<script>const a = 1;</script>';
+  const bare = `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`;
+  const { errors } = check(bare, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('store()')), errors.join('\n'));
 });
 
 // ---------- กล่องแชทต้องรู้จักคำสั่งครบ ----------
