@@ -126,6 +126,46 @@ test('idsUsed รับทั้ง $() และ getElementById', () => {
 
 // ---------- ไม่มี build step ----------
 
+test('🛑 async function ซ้ำต้องแดง — ด่านเคยมองไม่เห็นทั้ง 25 ตัวในไฟล์', () => {
+  // 7 ก.ย. 2026 CTO ฉีด `async function load(){}` ซ้ำเข้าไฟล์จริงแล้วด่านยังเขียว
+  // เป็นบั๊กชนิดเดียวกับ esc ซ้ำเมื่อ 22 ส.ค. ที่ทำให้ script ทั้งไฟล์พัง
+  const [d] = duplicateNames('async function load() {}\nasync function load() {}');
+  assert.equal(d?.name, 'load');
+  assert.equal(d.firstLine, 1);
+  assert.equal(d.line, 2);
+});
+
+test('async ชนกับ function ธรรมดาก็ต้องแดง — ชื่อเดียวกันคือชนกัน', () => {
+  const [d] = duplicateNames('function loadAgents() {}\nasync function loadAgents() {}');
+  assert.equal(d?.name, 'loadAgents');
+});
+
+test('ด่านจริง — async function ทุกตัวในหน้าต้องถูกมองเห็น', () => {
+  // ⚠️ ข้อนี้ตายเมื่อไหร่ที่ regex ถอยกลับ ไม่ต้องรอให้เกิดบั๊กจริงก่อน
+  // ⚠️ inlineScripts คืน {attrs, code, line} ไม่ใช่สตริง
+  //    join ตรง ๆ จะได้ '[object Object]' แล้วเทสแดงโดยที่ของจริงไม่ได้ผิด
+  const code = inlineScripts(REAL).map((x) => x.code).join('\n;\n');
+  const seen = new Set(topLevelNames(code).map((d) => d.name));
+  const declared = [...REAL.matchAll(/^async function\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
+
+  assert.ok(declared.length >= 10,
+    'เจอ async function แค่ ' + declared.length + ' ตัว — โครงไฟล์เปลี่ยนแล้ว ด่านนี้ตายแล้ว');
+  const blind = declared.filter((n) => !seen.has(n));
+  assert.deepEqual(blind, [], 'ด่านมองไม่เห็น async พวกนี้ — ประกาศซ้ำได้โดยไม่มีอะไรร้อง');
+});
+
+test('คำที่ขึ้นต้นเหมือนคำสำคัญแต่ไม่ใช่ ต้องไม่ถูกนับ', () => {
+  // ถ้าใช้ \s* เฉย ๆ แทน lookahead คำว่า constfoo จะถูกอ่านเป็น const ชื่อ foo
+  assert.deepEqual(topLevelNames('constfoo = 1'), []);
+  assert.deepEqual(topLevelNames('functional = 1'), []);
+  assert.deepEqual(topLevelNames('classroom = 1'), []);
+});
+
+test('generator ก็ต้องถูกมองเห็น — ยังไม่มีในไฟล์ แต่จะได้ไม่ตาบอดซ้ำ', () => {
+  assert.deepEqual(topLevelNames('function* gen() {}').map((d) => d.name), ['gen']);
+  assert.deepEqual(topLevelNames('async function* stream() {}').map((d) => d.name), ['stream']);
+});
+
 test('topLevelNames นับเฉพาะที่คอลัมน์ 0', () => {
   const names = topLevelNames('const a = 1;\n  const b = 2;\nfunction c() {}').map((d) => d.name);
   assert.deepEqual(names, ['a', 'c']);

@@ -54,9 +54,22 @@ export function inlineScripts(html) {
  * ให้ใช้และเราไม่รับ dependency · เคสที่พลาดจริง (`function esc()` ชนกับ
  * `const esc =` ทั้งคู่อยู่คอลัมน์ 0) จับได้ด้วยวิธีนี้ทั้งหมด
  */
+/**
+ * ชื่อที่ประกาศไว้ที่คอลัมน์ 0
+ *
+ * 🛑 7 ก.ย. 2026 — regex เดิมจับแค่ `const|let|var|function|class`
+ *    ไฟล์มี `async function` อยู่ **25 ตัว** และด่านมองไม่เห็นสักตัว
+ *    ประกาศ `async function load` ซ้ำได้โดยด่านยังเขียว ซึ่งคือบั๊กชนิดเดียวกับ
+ *    `esc` ซ้ำเมื่อ 22 ส.ค. ที่ทำให้ script ทั้งไฟล์พังและทั้งหน้าใช้ไม่ได้
+ *
+ * ⚠️ `(?=[\s*])` ต้องมี — ถ้าใช้ `\s*` เฉย ๆ คำว่า `constfoo` จะถูกอ่านเป็น
+ *    const ชื่อ foo · lookahead บังคับว่าหลังคำสำคัญต้องเป็นเว้นวรรคหรือดาว
+ *    ส่วน `\*?` รองรับ generator (`function* gen`) ซึ่งตอนนี้ยังไม่มีในไฟล์
+ *    แต่ถ้าวันหนึ่งมี จะได้ไม่ตาบอดซ้ำรอยเดิม
+ */
 export function topLevelNames(code) {
   const out = [];
-  const re = /^(const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm;
+  const re = /^(?:async\s+)?(const|let|var|function|class)(?=[\s*])\s*\*?\s*([A-Za-z_$][\w$]*)/gm;
   let m;
   while ((m = re.exec(code)) !== null) {
     out.push({ kind: m[1], name: m[2], line: code.slice(0, m.index).split('\n').length });
