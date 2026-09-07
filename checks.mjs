@@ -139,23 +139,30 @@ export function secretsIn(text) {
 }
 
 /**
- * ที่เก็บโทเคน **โดยปริยาย** — คืน 'sessionStorage' · 'localStorage' · null
+ * ทุกบรรทัดที่ **เขียนโทเคนลงเครื่องจริง ๆ** — คืนรายการที่เก็บของแต่ละจุด หรือ null
  *
- * 🛑 ของเดิมตรวจแค่ `/sessionStorage/.test(html)` ซึ่งพิสูจน์แล้วว่าไม่กันอะไรเลย
- *    CTO เปลี่ยน `store()` ให้คืน localStorage เสมอ แล้วด่านยังเขียว
- *    เพราะคำว่า sessionStorage ยังอยู่ในคอมเมนต์บรรทัดอื่น
+ * 🛑 สองรอบแล้วที่กฎข้อนี้เฝ้าผิดที่
  *
- * ตอนนี้ตรวจ **รูปของนิพจน์** — ต้องเป็น "ถ้าเคยติ๊กจำไว้ ใช้ localStorage
- * มิฉะนั้น sessionStorage" เท่านั้น · รูปอื่นถือว่าเก็บถาวรไว้ก่อน
- * **เดาไปทางที่อันตรายกว่าเสมอ** จนกว่าจะพิสูจน์ว่าไม่ใช่
+ *    รอบแรก  `/sessionStorage/.test(html)` — ผ่านเพราะคำนั้นอยู่ในคอมเมนต์
+ *    รอบสอง  อ่านรูปของ `store()` — **ซึ่งไม่มีใครเรียกเลย เป็นโค้ดตาย**
+ *            เปลี่ยนบรรทัดที่เขียนจริงให้ลง localStorage เสมอ ด่านยังเขียว
+ *
+ *    บทเรียน: **เฝ้าบรรทัดที่ลงมือ ไม่ใช่บรรทัดที่ประกาศเจตนา**
+ *    และเทสต้องกลายพันธุ์ `index.html` ตัวจริง ไม่ใช่สตริงที่เราแต่งเอง
+ *    รอบสองผ่านเพราะเทสทดสอบกับสตริงที่เขียนขึ้นมาเองทั้งหมด
+ *
+ * 'conditional' = ผู้ใช้เลือกเอง · 'sessionStorage' = ชั่วคราวเสมอ
+ * อย่างอื่นถือเป็น 'localStorage' คือเก็บถาวร — **เดาไปทางที่อันตรายกว่าเสมอ**
  */
-export function tokenStore(html) {
-  const m = /const store\s*=\s*\(\)\s*=>\s*([^;]+);/.exec(String(html ?? ''));
-  if (!m) return null;
-  const body = m[1].trim();
-  if (/\?[^:]*:\s*sessionStorage\s*\)?\s*$/.test(body)) return 'sessionStorage';
-  if (/^\(?\s*sessionStorage\s*\)?$/.test(body)) return 'sessionStorage';
-  return 'localStorage';
+export function tokenWrite(html) {
+  const hits = [...String(html ?? '').matchAll(/([^\n;{}]*)\.setItem\(\s*KEY\s*,/g)]
+    .map((m) => m[1].trim());
+  if (!hits.length) return null;
+  return hits.map((recv) => {
+    if (/\?[^:]*:\s*sessionStorage\s*\)?$/.test(recv)) return 'conditional';
+    if (/(^|[^\w.])sessionStorage\s*\)?$/.test(recv)) return 'sessionStorage';
+    return 'localStorage';
+  });
 }
 
 /**
@@ -246,13 +253,17 @@ export function check(html, { root = ROOT } = {}) {
   }
 
   // ---- โทเคนต้องไม่ถูกเก็บถาวรโดยปริยาย ----
-  const storeKind = tokenStore(html);
-  facts.tokenStore = storeKind;
-  if (storeKind === null) {
-    errors.push('หา store() ไม่เจอ — ไม่รู้ว่าโทเคนถูกเก็บที่ไหน ซึ่งแปลว่าตรวจไม่ได้');
-  } else if (storeKind !== 'sessionStorage') {
-    errors.push('โทเคนถูกเก็บถาวรโดยปริยาย — คอมที่ทำงานไม่ใช่เครื่องของเรา'
-      + ' ต้องเป็น sessionStorage เว้นแต่ผู้ใช้ติ๊กจำไว้เอง (INVARIANTS §5.1)');
+  const writes = tokenWrite(html);
+  facts.tokenWrite = writes;
+  if (writes === null) {
+    errors.push('ไม่เจอบรรทัดที่เขียนโทเคนลงเครื่อง — ตรวจไม่ได้ ถือว่าไม่ผ่าน');
+  } else {
+    for (const w of writes) {
+      if (w === 'localStorage') {
+        errors.push('มีบรรทัดที่เขียนโทเคนลง localStorage โดยไม่ให้ผู้ใช้เลือก'
+          + ' — คอมที่ทำงานไม่ใช่เครื่องของเรา (INVARIANTS §5.1)');
+      }
+    }
   }
 
   // ---- ต้องเตือนเมื่อข้อมูลเก่า ----

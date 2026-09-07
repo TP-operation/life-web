@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   check, inlineScripts, topLevelNames, duplicateNames, idsIn, idsUsed, hostsIn, ALLOWED_HOSTS,
-  chatRoutesIn, secretsIn, tokenStore, staleHours,
+  chatRoutesIn, secretsIn, tokenWrite, staleHours,
 } from './checks.mjs';
 
 /** จุดจบของฟังก์ชันที่คอลัมน์ 0 — เขียนแบบนี้เพื่อเลี่ยง escape ในสคริปต์ที่สร้างไฟล์นี้ */
@@ -27,7 +27,9 @@ const BASELINE = `<script>const CHAT_ROUTES = [`
     .map((p) => `{ p: '${p}' },`).join('')
   + `];
 const KEY = 'pat';
-const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);
+function saveToken(v) {
+  (remember.checked ? localStorage : sessionStorage).setItem(KEY, v);
+}
 function staleNote(genMs) {
   const ageH = (Date.now() - genMs) / 3600000;
   return ageH > 18 ? 'ข้อมูลเก่า' : '';
@@ -208,23 +210,47 @@ test('ด่านจริง — ไฟล์ที่ใช้อยู่ต
   assert.deepEqual(secretsIn(REAL), []);
 });
 
-test('🛑 บังคับให้เก็บโทเคนถาวรต้องแดง — คอมที่ทำงานไม่ใช่เครื่องของเรา', () => {
-  // CTO เปลี่ยน store() ให้คืน localStorage เสมอแล้วด่านเดิมยังเขียว
-  // เพราะมันตรวจแค่ว่ามีคำว่า sessionStorage อยู่ในไฟล์ ซึ่งยังอยู่ในคอมเมนต์
-  const good = 'const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);';
-  const bad = 'const store = () => localStorage; // sessionStorage';
-  assert.equal(tokenStore(good), 'sessionStorage');
-  assert.equal(tokenStore(bad), 'localStorage');
-  assert.equal(tokenStore('ไม่มี store เลย'), null);
+/** บรรทัดที่เขียนโทเคนลงเครื่องจริง ๆ ในหน้าที่ใช้อยู่ */
+const WRITE_LINE = "($('remember').checked ? localStorage : sessionStorage).setItem(KEY, v);";
+
+test('🛑 บังคับให้เก็บโทเคนถาวรต้องแดง — กลายพันธุ์บรรทัดที่เขียนจริง', () => {
+  // ⚠️ ข้อนี้ต้องกลายพันธุ์ **ไฟล์จริง** ห้ามใช้สตริงที่เราแต่งเอง
+  //
+  // 8 ก.ย. 2026 กฎข้อนี้เฝ้าผิดที่มาแล้วสองรอบ
+  //   รอบแรก  หาคำว่า sessionStorage ในไฟล์ — ผ่านเพราะคำนั้นอยู่ในคอมเมนต์
+  //   รอบสอง  อ่านรูปของ store() — ซึ่ง **ไม่มีใครเรียกเลย เป็นโค้ดตาย**
+  //
+  // รอบสองรอดมาได้เพราะเทสทดสอบกับสตริงที่เขียนขึ้นเองล้วน ๆ
+  // ต่างจากเทสของ staleHours ที่ใช้ REAL.replace() แล้วจับของจริงได้
+  assert.ok(REAL.includes(WRITE_LINE), 'บรรทัดที่เขียนโทเคนเปลี่ยนรูปแล้ว — เทสนี้ตายแล้ว');
+
+  const bad = REAL.replace(WRITE_LINE, 'localStorage.setItem(KEY, v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('localStorage')), errors.join('\n'));
+});
+
+test('ลบบรรทัดที่เขียนโทเคนทิ้งก็ต้องแดง — ตรวจไม่ได้คือไม่ผ่าน', () => {
+  const gone = REAL.replace('.setItem(KEY, v)', '.noop(KEY, v)');
+  const { errors } = check(gone, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('ไม่เจอบรรทัดที่เขียนโทเคน')));
 });
 
 test('รูปที่อ่านไม่ออกต้องถือว่าอันตรายไว้ก่อน', () => {
-  // เดาไปทางที่ปลอดภัยกว่า = เดาผิดแล้วโทเคนค้างในเครื่องคนอื่น
-  assert.equal(tokenStore('const store = () => pickStore();'), 'localStorage');
+  // เดาผิดทางปลอดภัย = โทเคนค้างในเครื่องที่ไม่ใช่ของเรา
+  assert.deepEqual(tokenWrite('pickStore().setItem(KEY, v);'), ['localStorage']);
+  assert.deepEqual(tokenWrite('sessionStorage.setItem(KEY, v);'), ['sessionStorage']);
+  assert.equal(tokenWrite('ไม่มีการเขียนโทเคน'), null);
 });
 
-test('ด่านจริง — หน้าที่ใช้อยู่ต้องเก็บโทเคนแบบชั่วคราวโดยปริยาย', () => {
-  assert.equal(tokenStore(REAL), 'sessionStorage');
+test('ด่านจริง — หน้าที่ใช้อยู่ต้องให้ผู้ใช้เลือกเอง ไม่ใช่เก็บถาวรเงียบ ๆ', () => {
+  assert.deepEqual(tokenWrite(REAL), ['conditional']);
+});
+
+test('🛑 ห้ามมีโค้ดตายที่หน้าตาเหมือนกฎความปลอดภัย', () => {
+  // store() เคยอยู่ในไฟล์โดยไม่มีใครเรียก แล้วหลอกให้ผมไปเฝ้ามันแทนบรรทัดจริง
+  // โค้ดตายที่ดูเหมือนกฎ อันตรายกว่าไม่มีกฎ เพราะมันให้ความมั่นใจปลอม
+  assert.ok(!/const store\s*=\s*\(\)\s*=>/.test(REAL),
+    'store() กลับมาแล้ว — ถ้าจะใช้จริงต้องมีคนเรียก ไม่งั้นอย่าประกาศทิ้งไว้');
 });
 
 test('🛑 ลบเงื่อนไขเตือนข้อมูลเก่าต้องแดง', () => {
@@ -256,7 +282,7 @@ test('หน้าที่ไม่บอกว่าเก็บโทเค�
   const body = '<script>const a = 1;</script>';
   const bare = `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`;
   const { errors } = check(bare, { root: ROOT });
-  assert.ok(errors.some((e) => e.includes('store()')), errors.join('\n'));
+  assert.ok(errors.some((e) => e.includes('เขียนโทเคน')), errors.join('\n'));
 });
 
 // ---------- กล่องแชทต้องรู้จักคำสั่งครบ ----------
