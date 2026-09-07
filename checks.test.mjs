@@ -183,7 +183,9 @@ test('generator ก็ต้องถูกมองเห็น — ยัง�
 //    ทุกข้อข้างล่างนี้คือเคสที่มันทดลองแล้วด่านเดิมผ่านเงียบ
 
 test('🛑 ฝังโทเคนลงในไฟล์ต้องแดง — repo นี้ public และประวัติ git ลบไม่ได้', () => {
-  const pat = 'github_pat_11ABCDEFG0123456789abcdefghijklmnopqrstuvwxyz';
+  // ⚠️ ต่อสตริงตอนรัน ห้ามเขียนรูปโทเคนเต็ม ๆ ลงไฟล์
+  //    ไม่งั้น agent-guard จะจับเทสของเราเองว่าเป็นโทเคนหลุด — และมันจับถูกแล้ว
+  const pat = 'github' + '_pat_' + '1'.repeat(40);
   const { errors } = check(page('<script>const T = "' + pat + '";</script>'), { root: ROOT });
   assert.ok(errors.some((e) => e.includes('GitHub PAT')));
 });
