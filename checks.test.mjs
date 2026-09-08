@@ -397,3 +397,47 @@ test('🛑 เกณฑ์ชั่วโมงต้องตรงกับท
   const ok = check(REAL.replace('ageH > 18', 'ageH > 12'), { root: ROOT });
   assert.ok(!ok.errors.some((e) => e.includes('เตือนข้อมูลเก่า')), 'เข้มกว่าที่ประกาศไว้ต้องผ่าน');
 });
+
+// ---------- รอบที่สามของ agent-review ----------
+
+test('🛑 เขียนค่าคีย์ด้วย backtick ต้องแดง — ต่างจากเคสที่ปิดแล้วแค่เครื่องหมายคำพูดตัวเดียว', () => {
+  // กฎประกาศว่า "ค่าของ KEY ต้องโผล่ครั้งเดียว" แต่โค้ดนับเฉพาะ ' กับ "
+  // สิ่งที่โค้ดประกาศ กับสิ่งที่โค้ดบังคับจริง ไม่ตรงกัน — ความผิดพลาดชนิดเดียวกับที่ PR นี้แก้
+  for (const q of ['`', '"', "'"]) {
+    const bad = REAL.replace(WRITE_LINE, `${WRITE_LINE}\n  localStorage.setItem(${q}life_pat${q}, v);`);
+    assert.ok(check(bad, { root: ROOT }).errors.length > 0, `เครื่องหมาย ${q} ยังหลุด`);
+  }
+});
+
+test('เขียนผ่าน bracket ก็ต้องแดง ไม่ใช่เฉพาะ setItem', () => {
+  const bad = REAL.replace(WRITE_LINE, `${WRITE_LINE}\n  localStorage[\`life_pat\`] = v;`);
+  assert.ok(check(bad, { root: ROOT }).errors.length > 0);
+});
+
+test('🛑 คอมเมนต์ที่มีคำว่า KEY ต้องไม่ทำให้ด่านแดง', () => {
+  // ด่านที่ร้องผิดคือด่านที่ถูกปิดทิ้ง — เขียนคอมเมนต์อธิบายเรื่องโทเคนต้องไม่โดนลงโทษ
+  const ok = REAL.replace(WRITE_LINE, `// KEY เก็บใน sessionStorage เท่านั้น\n  ${WRITE_LINE}`);
+  assert.deepEqual(check(ok, { root: ROOT }).errors, []);
+});
+
+test('setItem( กับ KEY อยู่คนละบรรทัดต้องผ่าน', () => {
+  const ok = REAL.replace(WRITE_LINE,
+    "($('remember').checked ? localStorage : sessionStorage).setItem(\n    KEY, v);");
+  assert.deepEqual(check(ok, { root: ROOT }).errors, []);
+});
+
+test('ค่าคีย์ที่มีอักขระพิเศษของ regex ต้องไม่ทำให้ด่านพังทั้งรอบ', () => {
+  // ด่านที่พังพร้อม stack trace แย่กว่าด่านที่บอกว่าอะไรผิด
+  // เพราะไม่มีใครรู้ว่าตกลงกฎอื่น ๆ ผ่านหรือไม่
+  for (const v of ['life(pat', 'life.pat', 'life[pat', 'life+pat']) {
+    const src = `<script>const KEY = "${v}"; localStorage.getItem(KEY);</script>`;
+    assert.deepEqual(keyMisuse(src), [], `ค่า ${v} ทำให้พัง`);
+  }
+});
+
+test('🛑 ตัวตัดคอมเมนต์ต้องไม่กินโค้ดจริงใน HTML', () => {
+  // accept="image/*" ในแท็ก input เปิดคอมเมนต์ปลอมแล้วกลืนยาวจนถึงตัวปิดถัดไป
+  // ซึ่งกินบรรทัดประกาศ const KEY ไปด้วย แล้วด่านขึ้นว่า "ไม่เจอการประกาศ" กับไฟล์ที่ถูกต้อง
+  assert.ok(REAL.includes('accept="image/*"'), 'แอตทริบิวต์นั้นหายไปแล้ว — เทสนี้ตายแล้ว');
+  assert.deepEqual(keyMisuse(REAL), []);
+});

@@ -118,7 +118,7 @@ export function chatRoutesIn(html) {
 /**
  * ความลับที่ห้ามอยู่ในไฟล์ไม่ว่ากรณีใด
  *
- * 🛑 ย้ายมาจาก `agent-guard.yml` เมื่อ 8 ก.ย. 2026
+ * 🛑 เพิ่มอีกชั้นจาก `agent-guard.yml` เมื่อ 8 ก.ย. 2026 — **ของที่นั่นยังอยู่ครบ ไม่ได้ย้าย**
  *    ที่นั่นรันเฉพาะ `pull_request_target` — **push ตรงเข้า main ไม่เคยโดนตรวจเลย**
  *    และ `checks.mjs` เองไม่มีกฎนี้สักข้อ ทั้งที่ README ประกาศว่า "ไม่มีโทเคนฝังในโค้ด"
  *    ตอนนี้ `checks` เป็น required status check แล้ว จึงเป็นที่ที่ถูกต้อง
@@ -171,23 +171,59 @@ export function secretsIn(text) {
  *    ยังเล็ดลอดได้ · **การตรวจข้อความไม่มีวันปิดได้ครบ** และไม่ควรอ้างว่าปิดครบ
  *    แต่สองข้อข้างบนปิดทุกรูปที่มีคนสาธิตมาแล้วจริง
  */
+/** ทำให้ข้อความปลอดภัยเมื่อเอาไปประกอบเป็น regex */
+const reEscape = (t) => String(t).replace(/[.*+?^\${}()|[\]\\]/g, String.fromCharCode(92) + "$&");
+
+/**
+ * เนื้อสคริปต์ล้วน ๆ โดยตัดคอมเมนต์ออกแล้ว
+ *
+ * 🛑 **ห้ามตัดคอมเมนต์จาก HTML ทั้งไฟล์** — ลองมาแล้วและพังทันที
+ *    แอตทริบิวต์ accept ที่รับทุกชนิดรูป มีอักขระเปิดคอมเมนต์อยู่ในค่า
+ *    ซึ่งกินบรรทัดประกาศ `const KEY` ไปด้วย · ด่านเลยขึ้นว่า "ไม่เจอการประกาศ" กับไฟล์ที่ถูกต้อง
+ *
+ *    เอาเฉพาะเนื้อใน <script> จึงปลอดภัย เพราะที่นั่นคอมเมนต์คือคอมเมนต์จริงเสมอ
+ *    และการเขียนโทเคนก็เกิดได้เฉพาะในสคริปต์อยู่แล้ว
+ */
+function scriptCode(html) {
+  return inlineScripts(html)
+    .map((x) => x.code)
+    .join('\n;\n')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+}
+
 export function keyMisuse(html) {
-  const src = String(html ?? '');
-  const decl = /const\s+KEY\s*=\s*(['"])([^'"]+)\1/.exec(src);
+  const src = scriptCode(html ?? "");
+
+  // ⚠️ ต้องรับ backtick ด้วย — รอบก่อนรับแค่ ' กับ " แล้ว
+  //    `localStorage.setItem(`+"`"+`life_pat`+"`"+`, v)` หลุดทั้งชุด
+  //    ต่างจากเคสที่ปิดไปแล้วแค่เครื่องหมายคำพูดตัวเดียว
+  const decl = /const\s+KEY\s*=\s*(['"`])([^'"`]+)\1/.exec(src);
   if (!decl) return ['ไม่เจอการประกาศ const KEY — ตรวจเส้นทางโทเคนไม่ได้'];
 
   const out = [];
   const value = decl[2];
-  const hits = (src.match(new RegExp(`(['"])${value}\\1`, 'g')) ?? []).length;
+
+  // ⚠️ ต้อง escape ก่อนยัดเข้า RegExp
+  //    ถ้าค่าคีย์มี ( หรือ . ของเดิมจะโยน SyntaxError ทั้งรอบ หรือกลายเป็น wildcard
+  //    ด่านที่พังพร้อม stack trace แย่กว่าด่านที่บอกว่าอะไรผิด
+  const hits = (src.match(new RegExp("(['\"`])" + reEscape(value) + "\\1", 'g')) ?? []).length;
   if (hits > 1) {
     out.push(`สตริง '${value}' โผล่ ${hits} ครั้ง — ต้องมีที่บรรทัดประกาศ KEY ที่เดียว`);
   }
 
-  for (const line of src.split('\n')) {
-    if (!/\bKEY\b/.test(line) || /const\s+KEY\s*=/.test(line)) continue;
-    const uses = [...line.matchAll(/\bKEY\b/g)].length;
-    const ok = [...line.matchAll(/(?:get|set|remove)Item\(\s*KEY\b/g)].length;
-    if (uses > ok) out.push(`ใช้ KEY นอกเหนือจาก get/set/removeItem: ${line.trim().slice(0, 60)}`);
+  // ลบการใช้ที่ถูกต้องทิ้งก่อน แล้วที่เหลือคือการใช้ผิด
+  //
+  // ⚠️ ทำกับทั้งไฟล์ ไม่ใช่ทีละบรรทัด เพราะ `setItem(` กับ `KEY` อยู่คนละบรรทัดได้
+  //    รอบก่อนวนทีละบรรทัดแล้วขึ้นแดงใส่โค้ดที่ถูกต้อง ซึ่งเป็น false alarm
+  //    ชนิดที่ไฟล์นี้เตือนตัวเองไว้ว่า "ด่านที่ร้องผิดคือด่านที่ถูกปิดทิ้ง"
+  const rest = src
+    .replace(/const\s+KEY\s*=\s*(['\"`])[^'\"`]*\1/, ' ')
+    .replace(/(?:get|set|remove)Item\(\s*KEY\b/g, ' ');
+
+  for (const m of rest.matchAll(/\bKEY\b/g)) {
+    const near = rest.slice(Math.max(0, m.index - 40), m.index + 20).replace(/\s+/g, ' ').trim();
+    out.push(`ใช้ KEY นอกเหนือจาก get/set/removeItem: …${near}…`);
   }
   return out;
 }
@@ -250,6 +286,7 @@ export function check(html, { root = ROOT } = {}) {
   // ---- ห้ามประกาศชื่อซ้ำ (บั๊กที่เกิดขึ้นจริง) ----
   const allCode = scripts.map((s) => s.code).join('\n;\n');
   const dups = duplicateNames(allCode);
+  // facts ที่เพิ่มมาต้องโผล่ใน --print ด้วย ไม่งั้นเก็บไว้ทำไม
   facts.topLevel = topLevelNames(allCode).length;
   for (const d of dups) {
     errors.push(`ประกาศ \`${d.name}\` ซ้ำ (${d.kind} บรรทัดที่ ${d.line} ของสคริปต์ ประกาศแรกอยู่บรรทัด ${d.firstLine}) — ทั้งไฟล์จะไม่ทำงาน`);
@@ -354,6 +391,8 @@ if (process.argv[1]?.endsWith('checks.mjs')) {
 
   if (process.argv.includes('--print') || errors.length) {
     console.log(`${files[0]} — สคริปต์ ${facts.scripts} ก้อน · ประกาศระดับบน ${facts.topLevel} ชื่อ · id ${facts.ids} ตัว (ใช้จริง ${facts.idsUsed}) · โดเมน ${(facts.hosts ?? []).join(' ') || 'ไม่มี'}`);
+    // facts ที่เก็บแล้วไม่โชว์ ก็เท่ากับไม่ได้เก็บ — คนอ่านต้องเห็นว่าด่านเห็นอะไร
+    console.log(`  โทเคน ${(facts.tokenWrite ?? ['ไม่พบ']).join(' ')} · เตือนข้อมูลเก่าที่ ${facts.staleHours ?? 'ไม่มี'} ชม.`);
   }
   for (const w of warnings) console.log(`::warning::${w}`);
   for (const e of errors) console.error(`::error::${e}`);
