@@ -154,6 +154,44 @@ export function secretsIn(text) {
  * 'conditional' = ผู้ใช้เลือกเอง · 'sessionStorage' = ชั่วคราวเสมอ
  * อย่างอื่นถือเป็น 'localStorage' คือเก็บถาวร — **เดาไปทางที่อันตรายกว่าเสมอ**
  */
+/**
+ * ทางที่ `KEY` ถูกใช้นอกเหนือจาก get/set/removeItem — คืนรายการปัญหา
+ *
+ * 🛑 agent-review ชี้ว่า `tokenWrite()` กันการ **แก้** บรรทัดเดิมได้ครบ
+ *    แต่ไม่กันการ **เพิ่ม** บรรทัดที่สอง · ยืนยันด้วยการรัน สองรูปนี้ผ่านเขียว
+ *
+ *      localStorage.setItem("life_pat", v);        ← เลี่ยงชื่อ KEY ใช้ค่าตรง ๆ
+ *      const K2 = KEY; localStorage.setItem(K2, v); ← ผ่านตัวแปรตัวกลาง
+ *
+ *    ปิดด้วยกฎสองข้อที่ตรวจได้จริง
+ *      1. ค่าของ KEY ต้องเป็นสตริงที่โผล่ครั้งเดียว คือที่บรรทัดประกาศ
+ *      2. ตัวแปร KEY ต้องปรากฏเป็นอาร์กิวเมนต์ของ get/set/removeItem เท่านั้น
+ *
+ * ⚠️ ยังไม่ปิดทุกทาง — โค้ดที่ประกอบชื่อคีย์ขึ้นมาตอนรัน (`'life' + '_pat'`)
+ *    ยังเล็ดลอดได้ · **การตรวจข้อความไม่มีวันปิดได้ครบ** และไม่ควรอ้างว่าปิดครบ
+ *    แต่สองข้อข้างบนปิดทุกรูปที่มีคนสาธิตมาแล้วจริง
+ */
+export function keyMisuse(html) {
+  const src = String(html ?? '');
+  const decl = /const\s+KEY\s*=\s*(['"])([^'"]+)\1/.exec(src);
+  if (!decl) return ['ไม่เจอการประกาศ const KEY — ตรวจเส้นทางโทเคนไม่ได้'];
+
+  const out = [];
+  const value = decl[2];
+  const hits = (src.match(new RegExp(`(['"])${value}\\1`, 'g')) ?? []).length;
+  if (hits > 1) {
+    out.push(`สตริง '${value}' โผล่ ${hits} ครั้ง — ต้องมีที่บรรทัดประกาศ KEY ที่เดียว`);
+  }
+
+  for (const line of src.split('\n')) {
+    if (!/\bKEY\b/.test(line) || /const\s+KEY\s*=/.test(line)) continue;
+    const uses = [...line.matchAll(/\bKEY\b/g)].length;
+    const ok = [...line.matchAll(/(?:get|set|remove)Item\(\s*KEY\b/g)].length;
+    if (uses > ok) out.push(`ใช้ KEY นอกเหนือจาก get/set/removeItem: ${line.trim().slice(0, 60)}`);
+  }
+  return out;
+}
+
 export function tokenWrite(html) {
   const hits = [...String(html ?? '').matchAll(/([^\n;{}]*)\.setItem\(\s*KEY\s*,/g)]
     .map((m) => m[1].trim());
@@ -172,6 +210,9 @@ export function tokenWrite(html) {
  *    การพิสูจน์อย่างหลังต้องรันหน้าใน DOM ซึ่งยังทำไม่ได้ที่นี่
  *    README ต้องเขียนตรง ๆ ว่าข้อนี้ยังอาศัยคน
  */
+/** เพดานชั่วโมงที่ยอมรับได้ — ต้องตรงกับตัวเลขใน README */
+export const STALE_MAX = 18;
+
 export function staleHours(html) {
   const m = /ageH\s*>\s*(\d+)/.exec(String(html ?? ''));
   return m ? Number(m[1]) : null;
@@ -265,14 +306,17 @@ export function check(html, { root = ROOT } = {}) {
       }
     }
   }
+  for (const m of keyMisuse(html)) errors.push(m);
 
   // ---- ต้องเตือนเมื่อข้อมูลเก่า ----
   const stale = staleHours(html);
   facts.staleHours = stale;
   if (stale === null) {
     errors.push('ไม่มีเกณฑ์เตือนข้อมูลเก่า — หน้าจะแสดงแผนของเมื่อวานเหมือนของวันนี้เงียบ ๆ');
-  } else if (stale > 24) {
-    errors.push(`เกณฑ์เตือนข้อมูลเก่าตั้งไว้ ${stale} ชม. ซึ่งเกินหนึ่งวัน — สายเกินจะมีประโยชน์`);
+  } else if (stale > STALE_MAX) {
+    // ⚠️ ตัวเลขนี้ต้องตรงกับที่ README เขียน ไม่งั้นเอกสารกับด่านบอกคนละอย่าง
+    //    ซึ่งเป็นความผิดพลาดชนิดเดียวกับที่ทั้ง PR นี้ตั้งใจจะแก้
+    errors.push(`เกณฑ์เตือนข้อมูลเก่าตั้งไว้ ${stale} ชม. เกิน ${STALE_MAX} ที่ README ประกาศไว้`);
   }
 
   // ---- กล่องแชทต้องรู้จักคำสั่งครบตามที่ฝั่งเซิร์ฟเวอร์รับจริง ----

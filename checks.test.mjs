@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   check, inlineScripts, topLevelNames, duplicateNames, idsIn, idsUsed, hostsIn, ALLOWED_HOSTS,
-  chatRoutesIn, secretsIn, tokenWrite, staleHours,
+  chatRoutesIn, secretsIn, tokenWrite, staleHours, keyMisuse, STALE_MAX,
 } from './checks.mjs';
 
 /** จุดจบของฟังก์ชันที่คอลัมน์ 0 — เขียนแบบนี้เพื่อเลี่ยง escape ในสคริปต์ที่สร้างไฟล์นี้ */
@@ -359,4 +359,41 @@ test('ไม่มีทะเบียนก็ไม่พัง แค่ไ�
 test('agent ที่ไม่มี prefix ต้องไม่ถูกจับคู่กับอะไรทั้งนั้น', () => {
   const agentFor = fnFromPage('agentFor');
   assert.equal(agentFor('อาทิตย์', REG), null, 'Cora ไม่ได้ตื่นจากคำขึ้นต้น');
+});
+
+// ---------- ช่องที่ agent-review สาธิตไว้ ต้องปิดแล้ว ----------
+
+test('🛑 เพิ่มบรรทัดเขียนโทเคนด้วยสตริงตรง ๆ ต้องแดง', () => {
+  // tokenWrite เห็นเฉพาะ setItem(KEY — เลี่ยงด้วยการเขียนค่าคีย์ตรง ๆ จึงรอดไปได้
+  // ปิดด้วยกฎว่าค่าของ KEY ต้องเป็นสตริงที่โผล่ครั้งเดียว คือที่บรรทัดประกาศ
+  const bad = REAL.replace(WRITE_LINE, WRITE_LINE + '\n  localStorage.setItem("life_pat", v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('life_pat')), errors.join('\n'));
+});
+
+test('🛑 ส่ง KEY ผ่านตัวแปรตัวกลางต้องแดง', () => {
+  const bad = REAL.replace(WRITE_LINE, WRITE_LINE + '\n  const K2 = KEY; localStorage.setItem(K2, v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('นอกเหนือจาก')), errors.join('\n'));
+});
+
+test('คีย์อื่นที่มีคำว่า KEY อยู่ในชื่อ ต้องไม่ถูกจับผิดตัว', () => {
+  // T_KEY · TAB_KEY · AGENT_FLIPS_KEY เป็นสถานะหน้าจอ ไม่ใช่โทเคน เขียนถาวรได้
+  assert.deepEqual(keyMisuse(REAL), []);
+  assert.ok(REAL.includes('localStorage.setItem(TAB_KEY'), 'หน้ายังเก็บแท็บไว้ใน localStorage อยู่');
+});
+
+test('ไม่มีการประกาศ KEY เลย ต้องบอกว่าตรวจไม่ได้ ไม่ใช่เงียบ', () => {
+  assert.equal(keyMisuse('ไม่มีอะไร').length, 1);
+});
+
+test('🛑 เกณฑ์ชั่วโมงต้องตรงกับที่ README ประกาศไว้', () => {
+  // ก่อนหน้านี้ด่านยอมถึง 24 ทั้งที่ README เขียน 18 — เอกสารกับด่านบอกคนละอย่าง
+  // ซึ่งเป็นความผิดพลาดชนิดเดียวกับที่ทั้ง PR นี้ตั้งใจจะแก้
+  assert.equal(STALE_MAX, 18);
+  const { errors } = check(REAL.replace('ageH > 18', 'ageH > 24'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('24')), errors.join('\n'));
+
+  const ok = check(REAL.replace('ageH > 18', 'ageH > 12'), { root: ROOT });
+  assert.ok(!ok.errors.some((e) => e.includes('เตือนข้อมูลเก่า')), 'เข้มกว่าที่ประกาศไว้ต้องผ่าน');
 });
