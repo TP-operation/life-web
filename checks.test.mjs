@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   check, inlineScripts, topLevelNames, duplicateNames, idsIn, idsUsed, hostsIn, ALLOWED_HOSTS,
-  chatRoutesIn,
+  chatRoutesIn, secretsIn, tokenWrite, staleHours, keyMisuse, STALE_MAX,
 } from './checks.mjs';
 
 /** จุดจบของฟังก์ชันที่คอลัมน์ 0 — เขียนแบบนี้เพื่อเลี่ยง escape ในสคริปต์ที่สร้างไฟล์นี้ */
@@ -18,13 +18,25 @@ const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const REAL = readFileSync(`${ROOT}index.html`, 'utf8');
 
 // ทุก fixture ต้องเป็น "หน้าที่ถูกต้องอยู่แล้ว" ยกเว้นสิ่งที่เทสนั้นตั้งใจทำให้ผิด
-// จึงต้องมี CHAT_ROUTES ครบติดมาด้วย ไม่งั้นทุกเทสจะแดงเพราะเรื่องที่ไม่ได้ทดสอบ
-const ROUTES_OK = `<script>const CHAT_ROUTES = [`
+// ไม่งั้นทุกเทสจะแดงเพราะเรื่องที่ไม่ได้ทดสอบ
+//
+// 8 ก.ย. 2026 เติมสองอย่างเข้ามา เพราะกฎเรื่องที่เก็บโทเคนกับการเตือนข้อมูลเก่า
+// เปลี่ยนจาก warning เป็น error — หน้าที่ขาดสองอย่างนี้ไม่ใช่หน้าที่ถูกต้องอีกต่อไป
+const BASELINE = `<script>const CHAT_ROUTES = [`
   + ['ออกกำลังกาย', 'ปิดงาน', 'เพิ่มงาน', 'โอที', 'ยืนยันงาน', 'ทิ้งงาน', 'นัด', 'ตอบ', 'สั่ง', 'ถาม']
     .map((p) => `{ p: '${p}' },`).join('')
-  + `];</script>`;
+  + `];
+const KEY = 'pat';
+function saveToken(v) {
+  (remember.checked ? localStorage : sessionStorage).setItem(KEY, v);
+}
+function staleNote(genMs) {
+  const ageH = (Date.now() - genMs) / 3600000;
+  return ageH > 18 ? 'ข้อมูลเก่า' : '';
+}
+</script>`;
 
-const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}${ROUTES_OK}</body></html>`;
+const page = (body) => `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}${BASELINE}</body></html>`;
 
 // ---------- หน้าจริงต้องผ่าน ----------
 
@@ -166,14 +178,111 @@ test('generator ก็ต้องถูกมองเห็น — ยัง�
   assert.deepEqual(topLevelNames('async function* stream() {}').map((d) => d.name), ['stream']);
 });
 
+
+// ---------- กฎที่ README ประกาศไว้ ต้องมีกลไกบังคับ ----------
+//
+// 🛑 8 ก.ย. 2026 CTO พิสูจน์ว่า README อ้างสี่ข้อแต่ **ไม่มีข้อไหนถูกบังคับเลย**
+//    ทุกข้อข้างล่างนี้คือเคสที่มันทดลองแล้วด่านเดิมผ่านเงียบ
+
+test('🛑 ฝังโทเคนลงในไฟล์ต้องแดง — repo นี้ public และประวัติ git ลบไม่ได้', () => {
+  // ⚠️ ต่อสตริงตอนรัน ห้ามเขียนรูปโทเคนเต็ม ๆ ลงไฟล์
+  //    ไม่งั้น agent-guard จะจับเทสของเราเองว่าเป็นโทเคนหลุด — และมันจับถูกแล้ว
+  const pat = 'github' + '_pat_' + '1'.repeat(40);
+  const { errors } = check(page('<script>const T = "' + pat + '";</script>'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('GitHub PAT')));
+});
+
+test('จับความลับได้ครบทั้งสี่ชนิด', () => {
+  assert.deepEqual(secretsIn('ghp_' + 'a'.repeat(36)), ['GitHub token']);
+  assert.deepEqual(secretsIn('sk-ant-' + 'b'.repeat(24)), ['Anthropic API key']);
+  assert.deepEqual(secretsIn('AKfyc' + 'c'.repeat(24)), ['URL ของ Apps Script deployment']);
+  assert.deepEqual(secretsIn('ไม่มีอะไร'), []);
+  assert.deepEqual(secretsIn(null), []);
+});
+
+test('⚠️ placeholder ในช่องกรอกต้องไม่ถูกจับเป็นโทเคนหลุด', () => {
+  // ถ้าด่านร้องผิด คนจะปิดมันทิ้ง แล้วเราจะเสียด่านไปทั้งอัน
+  assert.deepEqual(secretsIn('placeholder="github_pat_..."'), []);
+  assert.deepEqual(secretsIn('ใส่ ghp_ ตามด้วยรหัส'), []);
+});
+
+test('ด่านจริง — ไฟล์ที่ใช้อยู่ต้องไม่มีความลับ', () => {
+  assert.deepEqual(secretsIn(REAL), []);
+});
+
+/** บรรทัดที่เขียนโทเคนลงเครื่องจริง ๆ ในหน้าที่ใช้อยู่ */
+const WRITE_LINE = "($('remember').checked ? localStorage : sessionStorage).setItem(KEY, v);";
+
+test('🛑 บังคับให้เก็บโทเคนถาวรต้องแดง — กลายพันธุ์บรรทัดที่เขียนจริง', () => {
+  // ⚠️ ข้อนี้ต้องกลายพันธุ์ **ไฟล์จริง** ห้ามใช้สตริงที่เราแต่งเอง
+  //
+  // 8 ก.ย. 2026 กฎข้อนี้เฝ้าผิดที่มาแล้วสองรอบ
+  //   รอบแรก  หาคำว่า sessionStorage ในไฟล์ — ผ่านเพราะคำนั้นอยู่ในคอมเมนต์
+  //   รอบสอง  อ่านรูปของ store() — ซึ่ง **ไม่มีใครเรียกเลย เป็นโค้ดตาย**
+  //
+  // รอบสองรอดมาได้เพราะเทสทดสอบกับสตริงที่เขียนขึ้นเองล้วน ๆ
+  // ต่างจากเทสของ staleHours ที่ใช้ REAL.replace() แล้วจับของจริงได้
+  assert.ok(REAL.includes(WRITE_LINE), 'บรรทัดที่เขียนโทเคนเปลี่ยนรูปแล้ว — เทสนี้ตายแล้ว');
+
+  const bad = REAL.replace(WRITE_LINE, 'localStorage.setItem(KEY, v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('localStorage')), errors.join('\n'));
+});
+
+test('ลบบรรทัดที่เขียนโทเคนทิ้งก็ต้องแดง — ตรวจไม่ได้คือไม่ผ่าน', () => {
+  const gone = REAL.replace('.setItem(KEY, v)', '.noop(KEY, v)');
+  const { errors } = check(gone, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('ไม่เจอบรรทัดที่เขียนโทเคน')));
+});
+
+test('รูปที่อ่านไม่ออกต้องถือว่าอันตรายไว้ก่อน', () => {
+  // เดาผิดทางปลอดภัย = โทเคนค้างในเครื่องที่ไม่ใช่ของเรา
+  assert.deepEqual(tokenWrite('pickStore().setItem(KEY, v);'), ['localStorage']);
+  assert.deepEqual(tokenWrite('sessionStorage.setItem(KEY, v);'), ['sessionStorage']);
+  assert.equal(tokenWrite('ไม่มีการเขียนโทเคน'), null);
+});
+
+test('ด่านจริง — หน้าที่ใช้อยู่ต้องให้ผู้ใช้เลือกเอง ไม่ใช่เก็บถาวรเงียบ ๆ', () => {
+  assert.deepEqual(tokenWrite(REAL), ['conditional']);
+});
+
+test('🛑 ห้ามมีโค้ดตายที่หน้าตาเหมือนกฎความปลอดภัย', () => {
+  // store() เคยอยู่ในไฟล์โดยไม่มีใครเรียก แล้วหลอกให้ผมไปเฝ้ามันแทนบรรทัดจริง
+  // โค้ดตายที่ดูเหมือนกฎ อันตรายกว่าไม่มีกฎ เพราะมันให้ความมั่นใจปลอม
+  assert.ok(!/const store\s*=\s*\(\)\s*=>/.test(REAL),
+    'store() กลับมาแล้ว — ถ้าจะใช้จริงต้องมีคนเรียก ไม่งั้นอย่าประกาศทิ้งไว้');
+});
+
+test('🛑 ลบเงื่อนไขเตือนข้อมูลเก่าต้องแดง', () => {
+  // ไม่มีเงื่อนไขนี้ หน้าจะแสดงแผนของเมื่อวานเหมือนของวันนี้โดยไม่มีอะไรบอก
+  assert.equal(staleHours('if (ageH > 18) {'), 18);
+  assert.equal(staleHours('if (false) {'), null);
+  const { errors } = check(REAL.replace('ageH > 18', 'false'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('เตือนข้อมูลเก่า')));
+});
+
+test('เกณฑ์ที่หลวมเกินหนึ่งวันก็ไม่นับว่ามีกฎ', () => {
+  const { errors } = check(REAL.replace('ageH > 18', 'ageH > 72'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('72')));
+});
+
+test('ด่านจริง — เกณฑ์ที่ใช้อยู่ต้องไม่เกินหนึ่งวัน', () => {
+  const h = staleHours(REAL);
+  assert.ok(h !== null && h <= 24, 'ได้ ' + h);
+});
+
 test('topLevelNames นับเฉพาะที่คอลัมน์ 0', () => {
   const names = topLevelNames('const a = 1;\n  const b = 2;\nfunction c() {}').map((d) => d.name);
   assert.deepEqual(names, ['a', 'c']);
 });
 
-test('เตือนถ้าไม่เจอ sessionStorage', () => {
-  const { warnings } = check(page('<script>const a = 1;</script>'), { root: ROOT });
-  assert.ok(warnings.some((w) => w.includes('sessionStorage')));
+test('หน้าที่ไม่บอกว่าเก็บโทเคนที่ไหน ต้องแดง ไม่ใช่แค่เตือน', () => {
+  // ⚠️ ของเดิมเป็น warning ซึ่ง CI ไม่แดง แปลว่ากฎนี้ไม่เคยกันอะไรเลย
+  //    ตอนนี้ยกเป็น error แล้ว — ตรวจไม่ได้ ต้องถือว่าไม่ผ่าน
+  const body = '<script>const a = 1;</script>';
+  const bare = `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`;
+  const { errors } = check(bare, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('เขียนโทเคน')), errors.join('\n'));
 });
 
 // ---------- กล่องแชทต้องรู้จักคำสั่งครบ ----------
@@ -250,4 +359,118 @@ test('ไม่มีทะเบียนก็ไม่พัง แค่ไ�
 test('agent ที่ไม่มี prefix ต้องไม่ถูกจับคู่กับอะไรทั้งนั้น', () => {
   const agentFor = fnFromPage('agentFor');
   assert.equal(agentFor('อาทิตย์', REG), null, 'Cora ไม่ได้ตื่นจากคำขึ้นต้น');
+});
+
+// ---------- ช่องที่ agent-review สาธิตไว้ ต้องปิดแล้ว ----------
+
+test('🛑 เพิ่มบรรทัดเขียนโทเคนด้วยสตริงตรง ๆ ต้องแดง', () => {
+  // tokenWrite เห็นเฉพาะ setItem(KEY — เลี่ยงด้วยการเขียนค่าคีย์ตรง ๆ จึงรอดไปได้
+  // ปิดด้วยกฎว่าค่าของ KEY ต้องเป็นสตริงที่โผล่ครั้งเดียว คือที่บรรทัดประกาศ
+  const bad = REAL.replace(WRITE_LINE, WRITE_LINE + '\n  localStorage.setItem("life_pat", v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('life_pat')), errors.join('\n'));
+});
+
+test('🛑 ส่ง KEY ผ่านตัวแปรตัวกลางต้องแดง', () => {
+  const bad = REAL.replace(WRITE_LINE, WRITE_LINE + '\n  const K2 = KEY; localStorage.setItem(K2, v);');
+  const { errors } = check(bad, { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('นอกเหนือจาก')), errors.join('\n'));
+});
+
+test('คีย์อื่นที่มีคำว่า KEY อยู่ในชื่อ ต้องไม่ถูกจับผิดตัว', () => {
+  // T_KEY · TAB_KEY · AGENT_FLIPS_KEY เป็นสถานะหน้าจอ ไม่ใช่โทเคน เขียนถาวรได้
+  assert.deepEqual(keyMisuse(REAL), []);
+  assert.ok(REAL.includes('localStorage.setItem(TAB_KEY'), 'หน้ายังเก็บแท็บไว้ใน localStorage อยู่');
+});
+
+test('ไม่มีการประกาศ KEY เลย ต้องบอกว่าตรวจไม่ได้ ไม่ใช่เงียบ', () => {
+  assert.equal(keyMisuse('ไม่มีอะไร').length, 1);
+});
+
+test('🛑 เกณฑ์ชั่วโมงต้องตรงกับที่ README ประกาศไว้', () => {
+  // ก่อนหน้านี้ด่านยอมถึง 24 ทั้งที่ README เขียน 18 — เอกสารกับด่านบอกคนละอย่าง
+  // ซึ่งเป็นความผิดพลาดชนิดเดียวกับที่ทั้ง PR นี้ตั้งใจจะแก้
+  assert.equal(STALE_MAX, 18);
+  const { errors } = check(REAL.replace('ageH > 18', 'ageH > 24'), { root: ROOT });
+  assert.ok(errors.some((e) => e.includes('24')), errors.join('\n'));
+
+  const ok = check(REAL.replace('ageH > 18', 'ageH > 12'), { root: ROOT });
+  assert.ok(!ok.errors.some((e) => e.includes('เตือนข้อมูลเก่า')), 'เข้มกว่าที่ประกาศไว้ต้องผ่าน');
+});
+
+// ---------- รอบที่สามของ agent-review ----------
+
+test('🛑 เขียนค่าคีย์ด้วย backtick ต้องแดง — ต่างจากเคสที่ปิดแล้วแค่เครื่องหมายคำพูดตัวเดียว', () => {
+  // กฎประกาศว่า "ค่าของ KEY ต้องโผล่ครั้งเดียว" แต่โค้ดนับเฉพาะ ' กับ "
+  // สิ่งที่โค้ดประกาศ กับสิ่งที่โค้ดบังคับจริง ไม่ตรงกัน — ความผิดพลาดชนิดเดียวกับที่ PR นี้แก้
+  for (const q of ['`', '"', "'"]) {
+    const bad = REAL.replace(WRITE_LINE, `${WRITE_LINE}\n  localStorage.setItem(${q}life_pat${q}, v);`);
+    assert.ok(check(bad, { root: ROOT }).errors.length > 0, `เครื่องหมาย ${q} ยังหลุด`);
+  }
+});
+
+test('เขียนผ่าน bracket ก็ต้องแดง ไม่ใช่เฉพาะ setItem', () => {
+  const bad = REAL.replace(WRITE_LINE, `${WRITE_LINE}\n  localStorage[\`life_pat\`] = v;`);
+  assert.ok(check(bad, { root: ROOT }).errors.length > 0);
+});
+
+test('🛑 คอมเมนต์ที่มีคำว่า KEY ต้องไม่ทำให้ด่านแดง', () => {
+  // ด่านที่ร้องผิดคือด่านที่ถูกปิดทิ้ง — เขียนคอมเมนต์อธิบายเรื่องโทเคนต้องไม่โดนลงโทษ
+  const ok = REAL.replace(WRITE_LINE, `// KEY เก็บใน sessionStorage เท่านั้น\n  ${WRITE_LINE}`);
+  assert.deepEqual(check(ok, { root: ROOT }).errors, []);
+});
+
+test('setItem( กับ KEY อยู่คนละบรรทัดต้องผ่าน', () => {
+  const ok = REAL.replace(WRITE_LINE,
+    "($('remember').checked ? localStorage : sessionStorage).setItem(\n    KEY, v);");
+  assert.deepEqual(check(ok, { root: ROOT }).errors, []);
+});
+
+test('ค่าคีย์ที่มีอักขระพิเศษของ regex ต้องไม่ทำให้ด่านพังทั้งรอบ', () => {
+  // ด่านที่พังพร้อม stack trace แย่กว่าด่านที่บอกว่าอะไรผิด
+  // เพราะไม่มีใครรู้ว่าตกลงกฎอื่น ๆ ผ่านหรือไม่
+  for (const v of ['life(pat', 'life.pat', 'life[pat', 'life+pat']) {
+    const src = `<script>const KEY = "${v}"; localStorage.getItem(KEY);</script>`;
+    assert.deepEqual(keyMisuse(src), [], `ค่า ${v} ทำให้พัง`);
+  }
+});
+
+test('🛑 ตัวตัดคอมเมนต์ต้องไม่กินโค้ดจริงใน HTML', () => {
+  // accept="image/*" ในแท็ก input เปิดคอมเมนต์ปลอมแล้วกลืนยาวจนถึงตัวปิดถัดไป
+  // ซึ่งกินบรรทัดประกาศ const KEY ไปด้วย แล้วด่านขึ้นว่า "ไม่เจอการประกาศ" กับไฟล์ที่ถูกต้อง
+  assert.ok(REAL.includes('accept="image/*"'), 'แอตทริบิวต์นั้นหายไปแล้ว — เทสนี้ตายแล้ว');
+  assert.deepEqual(keyMisuse(REAL), []);
+});
+
+// ---------- รอบที่สี่ — โจมตีตัวเตรียมข้อความ ไม่ใช่ตัวตัดสิน ----------
+//
+// 🛑 เทสหกตัวของรอบก่อนแทรกโค้ดแบบสะอาด ๆ ทั้งหมด จึงไม่มีตัวไหนแตะช่องนี้เลย
+//    ตัวตัดคอมเมนต์ที่ไม่รู้จักสตริงกินโค้ดจริงไปด้วย และจุดที่ตาบอดคือ 26 บรรทัด
+//    ที่ fetch ไป api.github.com — **จุดที่โทเคนถูกใช้จริง คือจุดที่ด่านตาบอดพอดี**
+
+const addLine = (x) => REAL.replace(WRITE_LINE, `${WRITE_LINE}\n  ${x}`);
+
+test('🛑 บรรทัดเขียนโทเคนที่มี URL นำหน้า ต้องไม่หายไปจากสายตาด่าน', () => {
+  const bad = addLine("const u='https://api.github.com'; localStorage.setItem(`life_pat`, v);");
+  assert.ok(check(bad, { root: ROOT }).errors.length > 0, 'ซ่อนหลัง // ในสตริงได้');
+});
+
+test('🛑 บรรทัดที่คั่นด้วยสตริงหน้าตาเหมือนคอมเมนต์ ต้องไม่ถูกกลืน', () => {
+  // รูปนี้กินได้ข้ามบรรทัดและไม่จำกัดความยาว จึงกว้างกว่าแบบ URL
+  const bad = addLine("const a='/*'; const K2 = KEY; localStorage.setItem(K2, v); const b='*/';");
+  assert.ok(check(bad, { root: ROOT }).errors.length > 0, 'ซ่อนระหว่างสตริง /* กับ */ ได้');
+});
+
+test('URL ในไฟล์จริงต้องไม่ทำให้ด่านตาบอด', () => {
+  // ถ้าวันหนึ่งมีคนเอาตัวตัดคอมเมนต์กลับมา ข้อนี้จะแดงทันที
+  const urls = (REAL.match(/https:\/\//g) ?? []).length;
+  assert.ok(urls >= 5, `เจอ URL แค่ ${urls} ที่ — ไฟล์เปลี่ยนไปแล้ว เทสนี้ตายแล้ว`);
+  assert.deepEqual(keyMisuse(REAL), []);
+});
+
+test('คอมเมนต์ต่อท้ายโค้ดยังนับ — เดาไปทางที่ปลอดภัยกว่า', () => {
+  // ข้ามเฉพาะบรรทัดที่ทั้งบรรทัดเป็นคอมเมนต์ ซึ่งดูจากตัวขึ้นต้นได้โดยไม่ต้องรู้จักสตริง
+  // ยอมร้องเกิน ดีกว่ายอมให้ผ่านเพราะเดาว่าเป็นคอมเมนต์
+  const bad = addLine('const K2 = KEY; // เอาไว้ใช้ทีหลัง');
+  assert.ok(check(bad, { root: ROOT }).errors.length > 0);
 });

@@ -115,6 +115,153 @@ export function chatRoutesIn(html) {
   return [...m[1].matchAll(/[{,]\s*p:\s*'([^']+)'/g)].map((x) => x[1]);
 }
 
+/**
+ * ความลับที่ห้ามอยู่ในไฟล์ไม่ว่ากรณีใด
+ *
+ * 🛑 เพิ่มอีกชั้นจาก `agent-guard.yml` เมื่อ 8 ก.ย. 2026 — **ของที่นั่นยังอยู่ครบ ไม่ได้ย้าย**
+ *    ที่นั่นรันเฉพาะ `pull_request_target` — **push ตรงเข้า main ไม่เคยโดนตรวจเลย**
+ *    และ `checks.mjs` เองไม่มีกฎนี้สักข้อ ทั้งที่ README ประกาศว่า "ไม่มีโทเคนฝังในโค้ด"
+ *    ตอนนี้ `checks` เป็น required status check แล้ว จึงเป็นที่ที่ถูกต้อง
+ *
+ * ⚠️ ต้องกำหนดความยาวขั้นต่ำ ไม่งั้น placeholder `github_pat_...` ในช่องกรอก
+ *    จะถูกจับเป็นโทเคนหลุด แล้วคนจะปิดด่านทิ้งเพราะมันร้องผิด
+ */
+export const SECRET_PATTERNS = [
+  { re: /gh[pousr]_[A-Za-z0-9]{30,}/, what: 'GitHub token' },
+  { re: /github_pat_[A-Za-z0-9_]{30,}/, what: 'GitHub PAT' },
+  { re: /sk-ant-[A-Za-z0-9_-]{20,}/, what: 'Anthropic API key' },
+  { re: /AKfyc[A-Za-z0-9_-]{20,}/, what: 'URL ของ Apps Script deployment' },
+];
+
+export function secretsIn(text) {
+  const t = String(text ?? '');
+  return SECRET_PATTERNS.filter((p) => p.re.test(t)).map((p) => p.what);
+}
+
+/**
+ * ทุกบรรทัดที่ **เขียนโทเคนลงเครื่องจริง ๆ** — คืนรายการที่เก็บของแต่ละจุด หรือ null
+ *
+ * 🛑 สองรอบแล้วที่กฎข้อนี้เฝ้าผิดที่
+ *
+ *    รอบแรก  `/sessionStorage/.test(html)` — ผ่านเพราะคำนั้นอยู่ในคอมเมนต์
+ *    รอบสอง  อ่านรูปของ `store()` — **ซึ่งไม่มีใครเรียกเลย เป็นโค้ดตาย**
+ *            เปลี่ยนบรรทัดที่เขียนจริงให้ลง localStorage เสมอ ด่านยังเขียว
+ *
+ *    บทเรียน: **เฝ้าบรรทัดที่ลงมือ ไม่ใช่บรรทัดที่ประกาศเจตนา**
+ *    และเทสต้องกลายพันธุ์ `index.html` ตัวจริง ไม่ใช่สตริงที่เราแต่งเอง
+ *    รอบสองผ่านเพราะเทสทดสอบกับสตริงที่เขียนขึ้นมาเองทั้งหมด
+ *
+ * 'conditional' = ผู้ใช้เลือกเอง · 'sessionStorage' = ชั่วคราวเสมอ
+ * อย่างอื่นถือเป็น 'localStorage' คือเก็บถาวร — **เดาไปทางที่อันตรายกว่าเสมอ**
+ */
+/**
+ * ทางที่ `KEY` ถูกใช้นอกเหนือจาก get/set/removeItem — คืนรายการปัญหา
+ *
+ * 🛑 agent-review ชี้ว่า `tokenWrite()` กันการ **แก้** บรรทัดเดิมได้ครบ
+ *    แต่ไม่กันการ **เพิ่ม** บรรทัดที่สอง · ยืนยันด้วยการรัน สองรูปนี้ผ่านเขียว
+ *
+ *      localStorage.setItem("life_pat", v);        ← เลี่ยงชื่อ KEY ใช้ค่าตรง ๆ
+ *      const K2 = KEY; localStorage.setItem(K2, v); ← ผ่านตัวแปรตัวกลาง
+ *
+ *    ปิดด้วยกฎสองข้อที่ตรวจได้จริง
+ *      1. ค่าของ KEY ต้องเป็นสตริงที่โผล่ครั้งเดียว คือที่บรรทัดประกาศ
+ *      2. ตัวแปร KEY ต้องปรากฏเป็นอาร์กิวเมนต์ของ get/set/removeItem เท่านั้น
+ *
+ * ⚠️ ยังไม่ปิดทุกทาง — โค้ดที่ประกอบชื่อคีย์ขึ้นมาตอนรัน (`'life' + '_pat'`)
+ *    ยังเล็ดลอดได้ · **การตรวจข้อความไม่มีวันปิดได้ครบ** และไม่ควรอ้างว่าปิดครบ
+ *    แต่สองข้อข้างบนปิดทุกรูปที่มีคนสาธิตมาแล้วจริง
+ */
+/** ทำให้ข้อความปลอดภัยเมื่อเอาไปประกอบเป็น regex */
+const reEscape = (t) => String(t).replace(/[.*+?^\${}()|[\]\\]/g, String.fromCharCode(92) + "$&");
+
+/**
+ * เนื้อใน <script> ล้วน ๆ — **ไม่ตัดคอมเมนต์**
+ *
+ * 🛑 สองรอบแล้วที่การตัดคอมเมนต์ด้วย regex ทำของพัง
+ *
+ *    รอบแรก  ตัดจาก HTML ทั้งไฟล์ → แอตทริบิวต์ accept ของ input รูปภาพ
+ *            เปิดคอมเมนต์ปลอมแล้วกลืนบรรทัดประกาศ const KEY ไปด้วย
+ *    รอบสอง  ตัดเฉพาะในสคริปต์ → ยังพังอยู่ดี เพราะทุก URL มี // อยู่กลางสตริง
+ *            ทุกอย่างหลัง URL ในบรรทัดเดียวกันหายไปจากสายตาด่าน
+ *            บรรทัดที่เขียนโทเคนซ่อนหลัง URL ได้ทั้งบรรทัด
+ *
+ * **ตัวตัดคอมเมนต์ที่ไม่รู้จักสตริง เชื่อไม่ได้** และจะรู้จักสตริงได้ต้องเขียน tokenizer
+ * ซึ่งเกินกว่าที่ไฟล์นี้ควรมี · จึงไม่ตัดเลย แล้วไปข้ามคอมเมนต์ตอนรายงานแทน
+ * ข้ามเฉพาะบรรทัดที่ **ทั้งบรรทัดเป็นคอมเมนต์** ซึ่งดูจากตัวขึ้นต้นได้โดยไม่ต้องรู้จักสตริง
+ */
+function scriptCode(html) {
+  return inlineScripts(html).map((x) => x.code).join('\n;\n');
+}
+
+export function keyMisuse(html) {
+  const src = scriptCode(html ?? "");
+
+  // ⚠️ ต้องรับ backtick ด้วย — รอบก่อนรับแค่ ' กับ " แล้ว
+  //    `localStorage.setItem(`+"`"+`life_pat`+"`"+`, v)` หลุดทั้งชุด
+  //    ต่างจากเคสที่ปิดไปแล้วแค่เครื่องหมายคำพูดตัวเดียว
+  const decl = /const\s+KEY\s*=\s*(['"`])([^'"`]+)\1/.exec(src);
+  if (!decl) return ['ไม่เจอการประกาศ const KEY — ตรวจเส้นทางโทเคนไม่ได้'];
+
+  const out = [];
+  const value = decl[2];
+
+  // ⚠️ ต้อง escape ก่อนยัดเข้า RegExp
+  //    ถ้าค่าคีย์มี ( หรือ . ของเดิมจะโยน SyntaxError ทั้งรอบ หรือกลายเป็น wildcard
+  //    ด่านที่พังพร้อม stack trace แย่กว่าด่านที่บอกว่าอะไรผิด
+  const hits = (src.match(new RegExp("(['\"`])" + reEscape(value) + "\\1", 'g')) ?? []).length;
+  if (hits > 1) {
+    out.push(`สตริง '${value}' โผล่ ${hits} ครั้ง — ต้องมีที่บรรทัดประกาศ KEY ที่เดียว`);
+  }
+
+  // ลบการใช้ที่ถูกต้องทิ้งก่อน แล้วที่เหลือคือการใช้ผิด
+  //
+  // ⚠️ ทำกับทั้งไฟล์ ไม่ใช่ทีละบรรทัด เพราะ `setItem(` กับ `KEY` อยู่คนละบรรทัดได้
+  //    รอบก่อนวนทีละบรรทัดแล้วขึ้นแดงใส่โค้ดที่ถูกต้อง ซึ่งเป็น false alarm
+  //    ชนิดที่ไฟล์นี้เตือนตัวเองไว้ว่า "ด่านที่ร้องผิดคือด่านที่ถูกปิดทิ้ง"
+  const rest = src
+    .replace(/const\s+KEY\s*=\s*(['\"`])[^'\"`]*\1/, ' ')
+    .replace(/(?:get|set|remove)Item\(\s*KEY\b/g, ' ');
+
+  // ⚠️ ข้ามเฉพาะบรรทัดที่ทั้งบรรทัดเป็นคอมเมนต์ — คอมเมนต์ต่อท้ายโค้ดยังนับ
+  //    เดาไปทางที่ปลอดภัยกว่า: ยอมร้องเกินดีกว่ายอมให้ผ่านเพราะเดาว่าเป็นคอมเมนต์
+  for (const line of rest.split('\n')) {
+    const t = line.trim();
+    if (!/\bKEY\b/.test(t)) continue;
+    //    ⚠️ ช่องแคบที่รู้ตัว: บรรทัดโค้ดที่ขึ้นต้นด้วย * (ตัวคูณที่ตัดบรรทัด)
+    //       จะถูกข้ามไปด้วย · ยอมไว้เพราะรูปนั้นแทบไม่มีใครเขียน และการแยกให้ออก
+    //       ต้องรู้ว่าอยู่ในบล็อกคอมเมนต์หรือเปล่า ซึ่งต้องมี tokenizer อีกที
+    if (t.startsWith('//') || t.startsWith('*')) continue;
+    out.push(`ใช้ KEY นอกเหนือจาก get/set/removeItem: ${t.slice(0, 60)}`);
+  }
+  return out;
+}
+
+export function tokenWrite(html) {
+  const hits = [...String(html ?? '').matchAll(/([^\n;{}]*)\.setItem\(\s*KEY\s*,/g)]
+    .map((m) => m[1].trim());
+  if (!hits.length) return null;
+  return hits.map((recv) => {
+    if (/\?[^:]*:\s*sessionStorage\s*\)?$/.test(recv)) return 'conditional';
+    if (/(^|[^\w.])sessionStorage\s*\)?$/.test(recv)) return 'sessionStorage';
+    return 'localStorage';
+  });
+}
+
+/**
+ * เกณฑ์ชั่วโมงที่ถือว่าข้อมูลเก่า — คืนตัวเลข หรือ null ถ้าไม่มีเลย
+ *
+ * ⚠️ **ข้อนี้พิสูจน์ได้แค่ว่ากฎยังอยู่ในโค้ด ไม่ได้พิสูจน์ว่ามันขึ้นจริงบนหน้าจอ**
+ *    การพิสูจน์อย่างหลังต้องรันหน้าใน DOM ซึ่งยังทำไม่ได้ที่นี่
+ *    README ต้องเขียนตรง ๆ ว่าข้อนี้ยังอาศัยคน
+ */
+/** เพดานชั่วโมงที่ยอมรับได้ — ต้องตรงกับตัวเลขใน README */
+export const STALE_MAX = 18;
+
+export function staleHours(html) {
+  const m = /ageH\s*>\s*(\d+)/.exec(String(html ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
 export function check(html, { root = ROOT } = {}) {
   const errors = [];
   const warnings = [];
@@ -147,6 +294,7 @@ export function check(html, { root = ROOT } = {}) {
   // ---- ห้ามประกาศชื่อซ้ำ (บั๊กที่เกิดขึ้นจริง) ----
   const allCode = scripts.map((s) => s.code).join('\n;\n');
   const dups = duplicateNames(allCode);
+  // facts ที่เพิ่มมาต้องโผล่ใน --print ด้วย ไม่งั้นเก็บไว้ทำไม
   facts.topLevel = topLevelNames(allCode).length;
   for (const d of dups) {
     errors.push(`ประกาศ \`${d.name}\` ซ้ำ (${d.kind} บรรทัดที่ ${d.line} ของสคริปต์ ประกาศแรกอยู่บรรทัด ${d.firstLine}) — ทั้งไฟล์จะไม่ทำงาน`);
@@ -185,8 +333,35 @@ export function check(html, { root = ROOT } = {}) {
     }
   }
 
-  if (!/sessionStorage/.test(html)) {
-    warnings.push('ไม่เจอ sessionStorage — โทเคนของคอมที่ทำงานต้องไม่ถูกเก็บถาวร (INVARIANTS §5.1)');
+  // ---- ความลับห้ามอยู่ในไฟล์ ----
+  for (const what of secretsIn(html)) {
+    errors.push(`เจอ ${what} ในไฟล์ — repo นี้ public และประวัติ git ลบไม่ได้`);
+  }
+
+  // ---- โทเคนต้องไม่ถูกเก็บถาวรโดยปริยาย ----
+  const writes = tokenWrite(html);
+  facts.tokenWrite = writes;
+  if (writes === null) {
+    errors.push('ไม่เจอบรรทัดที่เขียนโทเคนลงเครื่อง — ตรวจไม่ได้ ถือว่าไม่ผ่าน');
+  } else {
+    for (const w of writes) {
+      if (w === 'localStorage') {
+        errors.push('มีบรรทัดที่เขียนโทเคนลง localStorage โดยไม่ให้ผู้ใช้เลือก'
+          + ' — คอมที่ทำงานไม่ใช่เครื่องของเรา (INVARIANTS §5.1)');
+      }
+    }
+  }
+  for (const m of keyMisuse(html)) errors.push(m);
+
+  // ---- ต้องเตือนเมื่อข้อมูลเก่า ----
+  const stale = staleHours(html);
+  facts.staleHours = stale;
+  if (stale === null) {
+    errors.push('ไม่มีเกณฑ์เตือนข้อมูลเก่า — หน้าจะแสดงแผนของเมื่อวานเหมือนของวันนี้เงียบ ๆ');
+  } else if (stale > STALE_MAX) {
+    // ⚠️ ตัวเลขนี้ต้องตรงกับที่ README เขียน ไม่งั้นเอกสารกับด่านบอกคนละอย่าง
+    //    ซึ่งเป็นความผิดพลาดชนิดเดียวกับที่ทั้ง PR นี้ตั้งใจจะแก้
+    errors.push(`เกณฑ์เตือนข้อมูลเก่าตั้งไว้ ${stale} ชม. เกิน ${STALE_MAX} ที่ README ประกาศไว้`);
   }
 
   // ---- กล่องแชทต้องรู้จักคำสั่งครบตามที่ฝั่งเซิร์ฟเวอร์รับจริง ----
@@ -224,6 +399,8 @@ if (process.argv[1]?.endsWith('checks.mjs')) {
 
   if (process.argv.includes('--print') || errors.length) {
     console.log(`${files[0]} — สคริปต์ ${facts.scripts} ก้อน · ประกาศระดับบน ${facts.topLevel} ชื่อ · id ${facts.ids} ตัว (ใช้จริง ${facts.idsUsed}) · โดเมน ${(facts.hosts ?? []).join(' ') || 'ไม่มี'}`);
+    // facts ที่เก็บแล้วไม่โชว์ ก็เท่ากับไม่ได้เก็บ — คนอ่านต้องเห็นว่าด่านเห็นอะไร
+    console.log(`  โทเคน ${(facts.tokenWrite ?? ['ไม่พบ']).join(' ')} · เตือนข้อมูลเก่าที่ ${facts.staleHours ?? 'ไม่มี'} ชม.`);
   }
   for (const w of warnings) console.log(`::warning::${w}`);
   for (const e of errors) console.error(`::error::${e}`);

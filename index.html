@@ -565,7 +565,6 @@ const KEY  = 'life_pat';
 const TREND_LABEL = '8 สัปดาห์ล่าสุด';
 
 const $ = (id) => document.getElementById(id);
-const store = () => (localStorage.getItem(KEY) ? localStorage : sessionStorage);
 const getToken = () => localStorage.getItem(KEY) || sessionStorage.getItem(KEY) || '';
 
 function note(msg, cls = '') {
