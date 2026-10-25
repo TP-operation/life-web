@@ -383,7 +383,6 @@
 <!-- แท็บโผล่หลังเชื่อมต่อแล้วเท่านั้น — ก่อนหน้านั้นมีแค่ช่องกรอกโทเคนให้ทำ -->
 <nav class="tabs hidden" id="tabs">
   <button data-tab="today" class="on">วันนี้</button>
-  <button data-tab="cal">ปฏิทิน</button>
   <button data-tab="kn">ความรู้</button>
   <button data-tab="projects">โปรเจค<span class="n" id="tabProjectsN"></span></button>
   <button data-tab="agents">agent<span class="n" id="tabAgentsN"></span></button>
@@ -408,6 +407,29 @@
 </section>
 
 <section id="status"></section>
+
+<!-- ปฏิทิน — งานที่มีกำหนดส่งกับวันพิเศษ วางบนตารางเดือน
+     ข้อมูลมาจาก state/calendar.json ที่ build-calendar.mjs ประกอบไว้แล้ว
+     หน้าเว็บไม่แยก frontmatter หรือ markdown เอง เพราะจะกลายเป็นตัวแยกสองชุด
+     ที่ต้องตรงกัน แล้วพังข้างเดียวเงียบ ๆ ตอนรูปแบบวันที่เปลี่ยน
+
+     อยู่บนสุดของแท็บวันนี้ แล้วงานค้างต่อข้างล่าง — นัดของวันนี้ต้องเห็นก่อนงาน
+     เพราะนัดเลื่อนไม่ได้ · งานค้างยังมาจาก today.json ไม่ได้มาจากวันกำหนดส่งบนปฏิทิน
+     ไม่งั้นงานที่เลยกำหนดจะไปกองอยู่ในวันเก่าที่ไม่มีใครกดดู -->
+<section class="card hidden" id="calBox">
+  <div class="calhead">
+    <button type="button" id="calPrev" aria-label="เดือนก่อน">‹</button>
+    <span id="calTitle"></span>
+    <button type="button" id="calNext" aria-label="เดือนถัดไป">›</button>
+    <button type="button" id="calToday">วันนี้</button>
+  </div>
+  <div class="calgrid" id="calGrid"></div>
+  <div id="calDay"></div>
+  <p class="muted" id="calNote" style="margin:8px 0 0"></p>
+</section>
+
+<section id="tasks"></section>
+<section id="drafts"></section>
 
 <!-- พอร์ตการลงทุน — ภาพถ่ายที่เจ้าของจดเอง ไม่ใช่ราคาสด
      แอปโบรกเกอร์บอกมูลค่าสดอยู่แล้ว งานของการ์ดนี้คือเอามาวางข้าง ๆ วันของเรา
@@ -488,22 +510,6 @@
   <input id="chatPicFile" type="file" accept="image/*" multiple hidden>
 </section>
 
-<!-- ปฏิทิน — งานที่มีกำหนดส่งกับวันพิเศษ วางบนตารางเดือน
-     ข้อมูลมาจาก state/calendar.json ที่ build-calendar.mjs ประกอบไว้แล้ว
-     หน้าเว็บไม่แยก frontmatter หรือ markdown เอง เพราะจะกลายเป็นตัวแยกสองชุด
-     ที่ต้องตรงกัน แล้วพังข้างเดียวเงียบ ๆ ตอนรูปแบบวันที่เปลี่ยน -->
-<section class="card hidden" id="calBox">
-  <div class="calhead">
-    <button type="button" id="calPrev" aria-label="เดือนก่อน">‹</button>
-    <span id="calTitle"></span>
-    <button type="button" id="calNext" aria-label="เดือนถัดไป">›</button>
-    <button type="button" id="calToday">วันนี้</button>
-  </div>
-  <div class="calgrid" id="calGrid"></div>
-  <div id="calDay"></div>
-  <p class="muted" id="calNote" style="margin:8px 0 0"></p>
-</section>
-
 <!-- ความรู้ — โน้ตที่ Ada เขียนตอนตอบคำถาม กับที่เจ้าของเขียนเอง
      สารบัญมาจาก state/knowledge.json เนื้อดึงทีละใบตอนกดอ่าน
      ถ้ายัดเนื้อลงสารบัญ ปีหน้าจะโหลดทั้งคลังทุกครั้งที่เปิดแท็บ
@@ -533,8 +539,6 @@
   <p class="muted" id="knNote" style="margin:8px 0 0"></p>
 </section>
 
-<section id="tasks"></section>
-<section id="drafts"></section>
 <section id="week"></section>
 <section id="projects"></section>
 <section id="agents"></section>
@@ -2130,6 +2134,8 @@ async function loadCalendar() {
       const [y, m] = String(j.today).split('-').map(Number);
       calState.ym = { y, m: m - 1 };
     }
+    // เปิดมาต้องเห็นนัดกับช่องเพิ่มของของวันนี้เลย ไม่ต้องกดหาวันเอง
+    if (!calState.sel) calState.sel = j.today;
     $('calNote').textContent = (j.warnings ?? []).length
       ? `ปฏิทินพิเศษมีบรรทัดที่อ่านไม่ออก ${j.warnings.length} บรรทัด`
       : '';
@@ -2188,6 +2194,15 @@ function renderMonth() {
   if (calState.sel) renderDay();
 }
 
+/** วันนี้ที่ไม่มีอะไรครบกำหนด ไม่ได้แปลว่าว่าง — งานที่เลยกำหนดไปกองอยู่ในวันเก่า
+    ถ้าขึ้นว่า "ไม่มีอะไร" เฉย ๆ จะอ่านเป็นวันว่างทั้งที่มีงานค้างรออยู่ข้างล่าง */
+function emptyDayText(date) {
+  const left = document.querySelectorAll('#tasks .task').length;
+  return date === calState.data?.today && left
+    ? `ไม่มีนัดหรืองานที่ครบกำหนดวันนี้ · งานค้าง ${left} อยู่ข้างล่าง`
+    : 'ยังไม่มีอะไรลงวันนี้';
+}
+
 function renderDay() {
   const date = calState.sel;
   const info = calState.data?.days?.[date];
@@ -2215,7 +2230,7 @@ function renderDay() {
     <span class="dhead">${esc(head)}${info?.special ? ` · ${esc(info.special.kindWord)} ${esc(info.special.note)}` : ''}</span>
     ${appts}
     ${items}
-    ${appts || items ? '' : '<span class="ditem muted">ยังไม่มีอะไรลงวันนี้</span>'}
+    ${appts || items ? '' : `<span class="ditem muted">${esc(emptyDayText(date))}</span>`}
     <div class="cmode">
       <button type="button" data-mode="task" class="${isTask ? 'on' : ''}">เพิ่มงาน</button>
       <button type="button" data-mode="appt" class="${isTask ? '' : 'on'}">เพิ่มนัด</button>
@@ -3050,8 +3065,7 @@ function renderAgents({ registry, regError, results }) {
 }
 
 const TABS = {
-  today:    ['plan', 'portBox', 'tasks', 'drafts'],
-  cal:      ['calBox'],
+  today:    ['calBox', 'tasks', 'drafts', 'plan', 'portBox'],
   kn:       ['knBox'],
   projects: ['projects'],
   agents:   ['agents'],
@@ -3146,7 +3160,7 @@ for (const b of document.querySelectorAll('nav.tabs button')) {
     clearTimeout(agentsState.timer);   // ออกจากแท็บแล้วต้องหยุดถาม
     agentsState.timer = null;
   }
-  if (tab === 'cal') loadCalendar();
+  if (tab === 'today') loadCalendar();
   if (tab === 'kn') loadKnowledge();
   if (tab === 'do') {
     loadChat();
