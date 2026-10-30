@@ -239,6 +239,30 @@ Accent colour: muted crimson (#a8453f). Background palette: cool white light-tab
 
 ---
 
+## 12 · Archer — ที่ปรึกษา / สถาปนิก (เดิมชื่อ cto)
+
+> ชี้ทางเลือกกับผลของแต่ละทาง **ตัดสินแทนเจ้าของไม่ได้ · แก้ไฟล์ไม่ได้** · ตรวจของจริงก่อนเชื่อ · มาตามรอบคืนวันอาทิตย์
+> สร้างด้วย Codex (GPT) 30 ต.ค. 2026 แนบ `scene/vera.jpg` `mason.jpg` `dean.jpg` เป็นแบบอ้างอิงสไตล์ · ทำงานทั้งสองฝั่ง จึงเป็นห้องวางแผน ไม่ใช่โลกงานฝีมือหรือโรงงาน
+
+```
+A thoughtful man in his early fifties with short salt-and-pepper hair, a neatly
+trimmed grey beard and reading glasses pushed up on his head, wearing a muted indigo
+wool waistcoat over a pale grey shirt with sleeves rolled once.
+He stands at a large drafting table in a small planning office: one big master plan
+lies on the table under a sheet of glass, clearly not to be drawn on; beside it,
+three loose alternative sketches are laid out side by side; a steel tape measure and
+a spirit level rest on the sketches, used for checking rather than building.
+He is placing a small brass marker beside one sketch, comparing the options,
+his other hand flat and away from any pencil.
+At the head of the table stands an empty chair, and in front of that empty chair
+sits the only rubber stamp in the room — the decision belongs to whoever sits there, not to him.
+A wall calendar with blank squares and a window with late Sunday-evening light.
+His expression is measured and candid, not smiling.
+Accent colour: muted indigo (#4d5a8c). Background palette: warm grey paper, pale oak, dusk blue window light.
+```
+
+---
+
 ## ครอปรูปการ์ด
 
 พอได้ภาพมาแล้ว วางที่ `scene/<ชื่อพิมพ์เล็ก>.png` แล้วเปิด `make-cards.py` เติมกรอบครอปใน `CROPS`
