@@ -2,6 +2,8 @@
 
 รูปตัวละครของ agent — ชื่อไฟล์ต้องตรงกับ `portrait:` ใน `70-agents/*.md` ของ repo `life`
 
+รูปการ์ดของทีม Offlabel ที่ไม่มีใน life (lyra · harper · kai · theo · penny · otis) ก๊อปมาจาก `team/staff/portraits/` — ต้นฉบับอยู่ที่นั่น · ที่นี่มีไว้ให้ Discord ของทีมดึงเป็นรูปผู้โพสต์ (webhook ต้องใช้รูปที่เปิดได้แบบสาธารณะ)
+
 ```
 portraits/
   iris.jpg  ada.jpg  ray.jpg  wren.jpg  cora.jpg  scout.jpg  mason.jpg  vera.jpg   ← รูปการ์ด 1:1
